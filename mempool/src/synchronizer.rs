@@ -51,36 +51,19 @@ impl Synchronizer {
             loop {
                 tokio::select! {
                     Some(message) = rx_inner.recv() => match message {
-                        SynchronizerMessage::Sync(mut missing, block) => {
+                        SynchronizerMessage::Sync(mut missing, block) => {//等待缺失的payload
+                            // TODO [issue #7]: A bad node may make us run out of memory by sending many blocks
+                            // with different round numbers or different payloads.
                             let (epoch,height) = (block.epoch,block.height);
                             let author = block.author;
-                            if pending.contains_key(&(epoch,height)) {
+                            if pending.contains_key(&(epoch,height)) {    //如果处理过，就不用在处理了
                                 continue;
                             }
-                            let wait_for: Vec<_> = missing.iter().cloned().map(|x| (x, store_copy.clone())).collect();
+                            let wait_for = missing.iter().cloned().map(|x| (x, store_copy.clone())).collect();
                             let (tx_cancel, rx_cancel) = channel(1);
                             pending.insert((epoch,height),  tx_cancel);
-
-                            let fut = Self::waiter(wait_for, block, rx_cancel);
-                            
-                            // Đặt một timeout cho việc chờ payload.
-                            let wait_timeout = Duration::from_millis(sync_retry_delay * 2);
-
-                            // Bọc future trong timeout và xử lý kết quả.
-                            let timed_fut = async move {
-                                match tokio::time::timeout(wait_timeout, fut).await {
-                                    Ok(waiter_result) => {
-                                        // Không timeout, trả về kết quả gốc.
-                                        waiter_result.map(|opt_block| (opt_block, None))
-                                    },
-                                    Err(_) => {
-                                        // Timeout! Ghi log và báo hiệu để xóa khỏi hàng đợi pending.
-                                        error!("Timeout waiting for payloads for block at epoch {}, height {}", epoch, height);
-                                        Ok((None, Some((epoch, height))))
-                                    }
-                                }
-                            };
-                            waiting.push(timed_fut);
+                            let fut = Self::waiter(wait_for, block, rx_cancel);//等待其他发送缺失的payload，然后从本地的store中取出
+                            waiting.push(fut);//存入等待队列中
 
                             let missing: Vec<_> = missing
                                 .drain()
@@ -95,7 +78,7 @@ impl Synchronizer {
                                     requests.insert(x.clone(), (epoch,height, now));
                                 }
 
-                                let message = MempoolMessage::PayloadRequest(missing.clone(), name);
+                                let message = MempoolMessage::PayloadRequest(missing.clone(), name); //向发送block的节点请求payload
                                 Self::transmit(
                                     &message,
                                     &name,
@@ -107,7 +90,7 @@ impl Synchronizer {
                                 .expect("Failed to send payload sync request");
                             }
                         },
-                        SynchronizerMessage::Clean(epoch,height) => {
+                        SynchronizerMessage::Clean(epoch,height) => {//将小于等于 round 轮的请求都清除
                             let size = committee.size() as u64;
                             let rank = epoch*size+height;
                             for ((e,h),handler) in &pending {
@@ -119,12 +102,12 @@ impl Synchronizer {
                             requests.retain(|_, (e,h,_)| (*e)*size+(*h) > rank);
                         }
                     },
-                    Some(result) = waiting.next() => {
+                    Some(result) = waiting.next() => { //等待请求有结果了
                         match result {
-                            Ok((Some(block), _)) => { // Trường hợp thành công
+                            Ok(Some(block)) => {
                                 debug!("mempool sync loopback block {:?}", block);
                                 let _ = pending.remove(&(block.epoch,block.height));
-                                for x in &block.payload {
+                                for x in &block.payload {//将已经收到的payload去除
                                     let _ = requests.remove(x);
                                 }
                                 let message = ConsensusMessage::LoopBackMsg(block);
@@ -132,16 +115,11 @@ impl Synchronizer {
                                     panic!("Failed to send message to consensus: {}", e);
                                 }
                             },
-                            Ok((None, Some((epoch, height)))) => { // Trường hợp Timeout
-                                // Xóa block khỏi hàng đợi pending để phá vỡ deadlock.
-                                let _ = pending.remove(&(epoch, height));
-                                debug!("Removed block ({}, {}) from pending due to sync timeout", epoch, height);
-                            }
-                            Ok((None, None)) => (), // Trường hợp bị hủy (Cleanup)
+                            Ok(None) => (),
                             Err(e) => error!("{}", e)
                         }
                     },
-                    () = &mut timer => { //timeout後,重新發送request
+                    () = &mut timer => {//超时后，重复发送request
                         let now = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .expect("Failed to measure time")
@@ -153,10 +131,7 @@ impl Synchronizer {
                             .cloned()
                             .collect();
                         if !retransmit.is_empty() {
-                            // --- BẮT ĐẦU SỬA ĐỔI ---
-                            // Chỉ định rõ kiểu dữ liệu để giải quyết cảnh báo
                             let message = MempoolMessage::PayloadRequest(retransmit, name);
-                            // --- KẾT THÚC SỬA ĐỔI ---
                             Self::transmit(
                                 &message,
                                 &name,
@@ -184,6 +159,7 @@ impl Synchronizer {
         deliver: Block,
         mut handler: Receiver<()>,
     ) -> MempoolResult<Option<Block>> {
+        //阻塞，等待有数据，并将其写完
         let waiting: Vec<_> = missing
             .iter_mut()
             .map(|(x, y)| y.notify_read(x.to_vec()))
@@ -204,11 +180,12 @@ impl Synchronizer {
         network_channel: &Sender<NetMessage>,
     ) -> MempoolResult<()> {
         let addresses = if let Some(to) = to {
+            //如果没有指定发送地址，则广播给出自己以外的所有人
             debug!("Sending {:?} to {}", message, to);
             vec![committee.mempool_address(to)?]
         } else {
             debug!("Broadcasting {:?}", message);
-            committee.broadcast_addresses(from)
+            committee.broadcast_addresses(&from)
         };
         let bytes = bincode::serialize(message).expect("Failed to serialize core message");
         let message = NetMessage(Bytes::from(bytes), addresses);
