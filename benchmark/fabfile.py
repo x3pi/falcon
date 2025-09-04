@@ -20,7 +20,7 @@ def local(ctx):
     }
     node_params = {
         'consensus': {
-            'fault': 1,
+            'fault': 0,
             'sync_timeout': 2_000,
             'timeout_delay': 2_000,
             'sync_retry_delay': 10_000,
@@ -36,7 +36,7 @@ def local(ctx):
         },
         'mempool': {
             'queue_capacity': 10_000,
-            'sync_retry_delay': 100_000,
+            'sync_retry_delay': 10_000,
             'max_payload_size': 15_0000,
             'min_block_delay': 0
         },
