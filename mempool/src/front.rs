@@ -1,6 +1,6 @@
 use crate::messages::Transaction;
 use futures::stream::StreamExt as _;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
@@ -44,7 +44,21 @@ impl Front {
             while let Some(frame) = transport.next().await {
                 match frame {
                     //接收客户端发送过来的消息 存入client——sender
-                    Ok(x) => deliver.send(x.to_vec()).await.expect("Core channel closed"),
+                    Ok(x) => {
+                        // --- LOG THÊM VÀO ---
+                        let tx_size = x.len();
+                        if tx_size > 0 {
+                            info!(
+                                "Received transaction from client {}, size: {} bytes. Forwarding to core.",
+                                peer, tx_size
+                            );
+                        } else {
+                            warn!("Received empty transaction from client {}.", peer);
+                        }
+                        // --- KẾT THÚC LOG THÊM VÀO ---
+
+                        deliver.send(x.to_vec()).await.expect("Core channel closed");
+                    }
                     Err(e) => {
                         warn!("Failed to receive client transaction: {}", e);
                         return;

@@ -130,6 +130,10 @@ impl Node {
     pub async fn analyze_block(&mut self) {
         while let Some(_block) = self.commit.recv().await {
             // This is where we can further process committed block.
+            info!(
+                "Block Committed - Epoch: {}, Height: {}",
+                _block.epoch, _block.height
+            );
         }
     }
 }

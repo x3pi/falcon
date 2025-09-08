@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# SCRIPT CONFIGURATION
+# SCRIPT CONFIGURATION (DEBUG MODE)
 # ==============================================================================
 # Dừng script ngay lập tức nếu có bất kỳ lệnh nào thất bại
 set -e
@@ -46,9 +46,7 @@ PARAMETERS_FILE="$BENCHMARK_DIR/.parameters.json"
 # ==============================================================================
 # SCRIPT EXECUTION
 # ==============================================================================
-# --- Stage 0: Build ---
-cargo clean
-cargo build --release --features benchmark
+
 # --- Giai đoạn 1: Dọn dẹp và Kiểm tra ---
 echo "--- Stage 1: Cleanup and Preparation ---"
 echo "INFO: Stopping tmux server..."
@@ -59,7 +57,8 @@ pkill -f "$CLIENT_BINARY" || true
 sleep 1
 
 echo "INFO: Cleaning up old files..."
-rm -rf "$LOG_DIR" "$BENCHMARK_DIR"/db_* "$BENCHMARK_DIR"/.node* "$COMMITTEE_FILE" "$PARAMETERS_FILE"
+# Xóa log cũ nhưng giữ lại thư mục chính
+rm -rf "$LOG_DIR"/*.log "$BENCHMARK_DIR"/db_* "$BENCHMARK_DIR"/.node* "$COMMITTEE_FILE" "$PARAMETERS_FILE"
 mkdir -p "$LOG_DIR"
 
 if ! command -v jq &> /dev/null; then
@@ -124,46 +123,27 @@ done
 echo "$committee_json" | jq . > "$COMMITTEE_FILE"
 echo "INFO: Configuration files generated successfully."
 
-# --- Giai đoạn 3: Khởi chạy Nodes và Clients ---
+# --- Giai đoạn 3: Khởi chạy Nodes (DEBUG MODE) ---
 echo ""
-echo "--- Stage 3: Launching Nodes and Clients ---"
-rate_share=$((RATE / NODES))
-echo "INFO: Launching $NODES clients..."
-for i in $(seq 0 $((NODES-1))); do
-    port=$((BASE_PORT + NODES + i)); addr="127.0.0.1:$port"; log_file="$LOG_DIR/client-$i.log"
-    # Sửa lỗi tmux với cơ chế chẩn đoán
-    full_cmd="$CLIENT_BINARY $addr --size $TX_SIZE --rate $rate_share --timeout $SYNC_TIMEOUT"
-    tmux new -d -s "client-$i" "sh -c '$full_cmd 2> $log_file || echo \"[FATAL] Client process exited.\" >> $log_file'"
-done
-
+echo "--- Stage 3: Launching Nodes in DEBUG mode ---"
 echo "INFO: Launching $NODES nodes..."
 for i in $(seq 0 $((NODES-1))); do
     key_file="${key_files[$i]}"; threshold_key_file="${threshold_key_files[$i]}"
-    db_path="$BENCHMARK_DIR/db_$i"; log_file="$LOG_DIR/node-$i.log"
+    db_path="$BENCHMARK_DIR/db_$i"
+    # Thay đổi tên file log để phân biệt với log info thông thường
+    log_file="$LOG_DIR/node-debug-$i.log"
     cmd="$NODE_BINARY run --keys $key_file --threshold_keys $threshold_key_file --committee $COMMITTEE_FILE --store $db_path --parameters $PARAMETERS_FILE"
     
-    # ==============================================================================
-    # SỬA LỖI TẠI ĐÂY: Cưỡng bức ghi log và thêm cơ chế chẩn đoán lỗi
-    # ==============================================================================
-    full_cmd_with_log="RUST_LOG=info $cmd"
-    tmux new -d -s "node-$i" "sh -c '$full_cmd_with_log 2> $log_file || echo \"[FATAL] Node process exited.\" >> $log_file'"
+    # THAY ĐỔI CHÍNH: Đặt RUST_LOG=debug thay vì RUST_LOG=info
+    full_cmd_with_log="RUST_LOG=debug $cmd"
+    
+    # Thay đổi tên session tmux để tránh xung đột
+    session_name="debug-node-$i"
+    tmux new -d -s "$session_name" "sh -c '$full_cmd_with_log 2> $log_file || echo \"[FATAL] Node process exited.\" >> $log_file'"
 done
 
-# --- Giai đoạn 4: Thực thi và Hiển thị Kết quả ---
 echo ""
-echo "--- Stage 4: Execution, Termination, and Results ---"
-echo "INFO: Waiting for nodes to synchronize..."
-sleep $(echo "2 * $SYNC_TIMEOUT / 1000" | bc -l)
-echo "INFO: Benchmark running for $DURATION seconds..."
-sleep $DURATION
-echo "INFO: Stopping all clients and nodes."
-tmux kill-server > /dev/null 2>&1 || true
-
-echo ""
-echo "========================================================"
-echo "          📊 BENCHMARK RESULTS 📊"
-echo "========================================================"
-(cd "$BENCHMARK_DIR" && ./venv/bin/fab logs)
-
-echo ""
-echo "✅ COMPLETE!"
+echo "✅ Nodes are now running in DEBUG mode."
+echo "   View sessions: tmux ls"
+echo "   Attach session example: tmux attach -t debug-node-0"
+echo "   View log example: tail -f $LOG_DIR/node-debug-0.log"
