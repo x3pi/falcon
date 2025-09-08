@@ -222,10 +222,24 @@ impl Core {
             return Ok(());
         }
         debug!("start rbc epoch {}", self.epoch);
+    
+        // --- LOG THÊM VÀO (Bước 1) ---
+        info!("Consensus core: Attempting to get payload from mempool driver for epoch {}.", self.epoch);
+        // --- KẾT THÚC LOG THÊM VÀO ---
+    
         let payload = self
             .mempool_driver
             .get(self.parameters.max_payload_size)
             .await;
+    
+        // --- LOG THÊM VÀO (Bước 2) ---
+        if payload.is_empty() {
+            info!("Consensus core: Mempool returned empty payload. Skipping proposal for now.");
+        } else {
+            info!("Consensus core: Mempool returned payload with {} digests.", payload.len());
+        }
+        // --- KẾT THÚC LOG THÊM VÀO ---
+    
         let block = Block::new(
             self.name,
             self.epoch,
@@ -236,7 +250,7 @@ impl Core {
         .await;
         if !block.payload.is_empty() {
             info!("Created {}", block);
-
+    
             #[cfg(feature = "benchmark")]
             for x in &block.payload {
                 // NOTE: This log entry is used to compute performance.
@@ -249,7 +263,7 @@ impl Core {
             }
         }
         debug!("Created {:?}", block);
-
+    
         // Process our new block and broadcast it.
         let message = ConsensusMessage::RBCValMsg(block.clone());
         Synchronizer::transmit(
@@ -261,13 +275,12 @@ impl Core {
         )
         .await?;
         self.handle_rbc_val(&block).await?;
-
+    
         // Wait for the minimum block delay.
         sleep(Duration::from_millis(self.parameters.min_block_delay)).await;
-
+    
         Ok(())
     }
-
     async fn handle_rbc_val(&mut self, block: &Block) -> ConsensusResult<()> {
         debug!(
             "processing RBC val epoch {} height {}",

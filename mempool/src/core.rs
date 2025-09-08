@@ -129,15 +129,25 @@ impl Core {
     }
 
     async fn handle_own_payload(&mut self, payload: Payload) -> MempoolResult<()> {
+        // --- LOG THÊM VÀO ---
+        let digest = payload.digest();
+        info!(
+            "Processing new payload {}, size: {} bytes, containing {} transactions.",
+            digest,
+            payload.size(),
+            payload.transactions.len()
+        );
+        // --- KẾT THÚC LOG THÊM VÀO ---
+    
         // Drop the transaction if our mempool is full.
         ensure!(
             self.queue.len() < self.parameters.queue_capacity,
             MempoolError::MempoolFull
         );
-
+    
         // Otherwise, try to add the transaction to the next payload
         // we will add to the queue.
-        let digest = payload.digest();
+        // let digest = payload.digest(); // <- Đã di chuyển lên trên
         self.process_own_payload(&digest, payload).await?; //payload存入queue中
         self.queue.insert(digest);
         Ok(())
