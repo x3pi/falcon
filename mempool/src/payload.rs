@@ -1,11 +1,9 @@
 use crate::core::MempoolMessage;
 use crate::messages::{Payload, Transaction};
-use crypto::{Hash, PublicKey, SignatureService}; // <-- THÊM 'Hash' VÀO ĐÂY
+use crypto::{PublicKey, SignatureService};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Duration};
-use log::info;
-
 
 struct Runner {
     transactions: Vec<Transaction>,
@@ -56,22 +54,13 @@ impl Runner {
     }
 
     async fn make(&mut self) -> Payload {
-        // SỬA LỖI: Thêm kiểu dữ liệu tường minh 'Vec<_>' cho 'transactions'
-        let transactions:Vec<Vec<u8>>     = self.transactions.drain(..).collect();
-        
-        let tx_count = transactions.len();
+        let transactions = self.transactions.drain(..).collect();
+
+        // Cleanup state.
+        self.size = 0;
 
         // Make a payload.
-        let payload = Payload::new(transactions, self.name, self.signature_service.clone()).await;
-
-        // Log sau khi tạo payload
-        info!(
-            "Successfully created payload {} containing {} transactions.",
-            payload.digest(),
-            tx_count
-        );
-
-        payload
+        Payload::new(transactions, self.name, self.signature_service.clone()).await
     }
 
     async fn run(&mut self) {
@@ -79,10 +68,6 @@ impl Runner {
             tokio::select! {
                 Some(transaction) = self.client_channel.recv() => {
                     if let Some(payload) = self.add(transaction).await {
-                        // --- LOG THÊM VÀO ---
-                        info!("Forwarding created payload to mempool core.");
-                        // --- KẾT THÚC LOG THÊM VÀO ---
-
                         let message = MempoolMessage::OwnPayload(payload);
                         if let Err(e) = self.core_channel.send(message).await {
                             panic!("Failed to send payload to the core: {}", e);
@@ -93,9 +78,6 @@ impl Runner {
                     }
                 },
                 Some(sender) = self.request_channel.recv() => {
-                    // --- LOG THÊM VÀO ---
-                    info!("Payload requested by consensus. Triggering payload creation.");
-                    // --- KẾT THÚC LOG THÊM VÀO ---
                     let _ = sender.send(self.make().await);
                 },
                 else => break,
