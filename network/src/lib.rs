@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures::sink::SinkExt as _;
 use futures::stream::StreamExt as _;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -42,22 +42,33 @@ impl NetSender {
     pub async fn run(&mut self) {
         let mut senders = HashMap::<_, Sender<_>>::new();
         while let Some(NetMessage(bytes, addresses)) = self.transmit.recv().await {
-            for address in addresses {
-                let spawn = match senders.get(&address) {
-                    //如果connect存在直接发送
-                    Some(tx) => tx.send(bytes.clone()).await.is_err(),
+            for address in &addresses {
+                info!("NetSender: Attempting to send message to {}", address);
+                let spawn = match senders.get(address) {
+                    Some(tx) => {
+                        if tx.send(bytes.clone()).await.is_err() {
+                            warn!("NetSender: Failed to send message to {}; connection might be closed. Retrying.", address);
+                            true // Mark for respawn
+                        } else {
+                            false
+                        }
+                    },
                     None => true,
                 };
                 if spawn {
-                    //如果不存在则创建一个新的连接
-                    let tx = Self::spawn_worker(address).await;
+                    info!("NetSender: Spawning new worker for address {}", address);
+                    let tx = Self::spawn_worker(*address).await;
                     if let Ok(()) = tx.send(bytes.clone()).await {
-                        senders.insert(address, tx);
+                        senders.insert(*address, tx);
+                        info!("NetSender: Successfully sent message to {} on new connection", address);
+                    } else {
+                        warn!("NetSender: Failed to send message to {} on new connection", address);
                     }
                 }
             }
         }
     }
+
 
     async fn spawn_worker(address: SocketAddr) -> Sender<Bytes> {
         // Each worker handle a TCP connection with on address.
@@ -123,24 +134,24 @@ impl<Message: 'static + Send + DeserializeOwned + Debug> NetReceiver<Message> {
         tokio::spawn(async move {
             let mut transport = Framed::new(socket, LengthDelimitedCodec::new());
             while let Some(frame) = transport.next().await {
+                info!("NetReceiver: Received frame from {}", peer);
                 match frame
                     .map_err(NetworkError::from)
                     .and_then(|x| bincode::deserialize(&x).map_err(NetworkError::from))
                 {
                     Ok(message) => {
-                        debug!("Received {:?}", message);
-                        deliver
-                            .send(message)
-                            .await
-                            .expect("Failed to deliver message");
+                        info!("NetReceiver: Deserialized message from {}, delivering to core.", peer);
+                        if let Err(e) = deliver.send(message).await {
+                             error!("NetReceiver: Failed to deliver message to core channel from peer {}: {}", peer, e);
+                        }
                     }
                     Err(e) => {
-                        warn!("{}", e);
+                        warn!("NetReceiver: Failed to process message from {}: {}", peer, e);
                         return;
                     }
                 }
             }
-            warn!("Connection closed by peer {}", peer);
+            warn!("NetReceiver: Connection closed by peer {}", peer);
         });
     }
 }

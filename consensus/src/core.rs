@@ -221,25 +221,19 @@ impl Core {
         if self.height < self.parameters.fault {
             return Ok(());
         }
-        debug!("start rbc epoch {}", self.epoch);
-    
-        // --- LOG THÊM VÀO (Bước 1) ---
-        info!("Consensus core: Attempting to get payload from mempool driver for epoch {}.", self.epoch);
-        // --- KẾT THÚC LOG THÊM VÀO ---
-    
+        info!("[CONSENSUS-LOG] Starting generate_rbc_proposal for epoch {}", self.epoch);
+
         let payload = self
             .mempool_driver
             .get(self.parameters.max_payload_size)
             .await;
-    
-        // --- LOG THÊM VÀO (Bước 2) ---
+            
         if payload.is_empty() {
-            info!("Consensus core: Mempool returned empty payload. Skipping proposal for now.");
+            info!("[CONSENSUS-LOG] Mempool returned empty payload. Skipping proposal for epoch {}.", self.epoch);
         } else {
-            info!("Consensus core: Mempool returned payload with {} digests.", payload.len());
+            info!("[CONSENSUS-LOG] Mempool returned payload with {} digests for epoch {}.", payload.len(), self.epoch);
         }
-        // --- KẾT THÚC LOG THÊM VÀO ---
-    
+
         let block = Block::new(
             self.name,
             self.epoch,
@@ -263,8 +257,9 @@ impl Core {
             }
         }
         debug!("Created {:?}", block);
-    
+
         // Process our new block and broadcast it.
+        info!("[CONSENSUS-LOG] Broadcasting block {}", block.epoch);
         let message = ConsensusMessage::RBCValMsg(block.clone());
         Synchronizer::transmit(
             message,
@@ -275,13 +270,15 @@ impl Core {
         )
         .await?;
         self.handle_rbc_val(&block).await?;
-    
+
         // Wait for the minimum block delay.
         sleep(Duration::from_millis(self.parameters.min_block_delay)).await;
-    
+
         Ok(())
     }
     async fn handle_rbc_val(&mut self, block: &Block) -> ConsensusResult<()> {
+        info!("[CONSENSUS-LOG] Received RBCValMsg for block {} from author {}", block.epoch, block.author);
+
         debug!(
             "processing RBC val epoch {} height {}",
             block.epoch, block.height
@@ -289,6 +286,7 @@ impl Core {
         block.verify(&self.committee)?;
         if self.parameters.exp > 0 {
             if !self.mempool_driver.verify(block.clone()).await? {
+                info!("[CONSENSUS-LOG] Mempool verification failed for block {}", block.epoch);
                 return Ok(());
             }
         }
@@ -305,6 +303,7 @@ impl Core {
         .await;
         let message = ConsensusMessage::RBCEchoMsg(vote.clone());
 
+        info!("[CONSENSUS-LOG] Broadcasting RBCEchoMsg for block {}", block.epoch);
         Synchronizer::transmit(
             message,
             &self.name,
@@ -848,14 +847,13 @@ impl Core {
     }
     /************* ABA Protocol ******************/
     pub async fn run(&mut self) {
-        // let total_nums = self.committee.size() as SeqNumber;
-        // let mut pending_rbc = FuturesUnordered::new();
         if let Err(e) = self.generate_rbc_proposal().await {
             panic!("protocol invoke failed! error {}", e);
         }
         loop {
             let result = tokio::select! {
                 Some(message) = self.rx_core.recv() => {
+                    info!("[CONSENSUS-LOG] Core received message: {:?}", message); // Log tổng quát
                     if self.height<self.parameters.fault{
                         continue;
                     }

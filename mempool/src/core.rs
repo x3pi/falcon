@@ -8,7 +8,7 @@ use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
 #[cfg(feature = "benchmark")]
 use log::info;
-use log::{error, warn};
+use log::{error, info, warn};
 use network::NetMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -121,23 +121,23 @@ impl Core {
         }
 
         // Store the payload.
+        info!("MempoolCore: Storing payload {}", digest);
         self.store_payload(digest.to_vec(), &payload).await;
 
         // Share the payload with all other nodes.
+        info!("MempoolCore: Broadcasting payload {} to other nodes", digest);
         let message = MempoolMessage::Payload(payload); //向其他节点发送这个payload
         self.transmit(&message, None).await
     }
 
     async fn handle_own_payload(&mut self, payload: Payload) -> MempoolResult<()> {
-        // --- LOG THÊM VÀO ---
         let digest = payload.digest();
-        // info!(
-        //     "Processing new payload {}, size: {} bytes, containing {} transactions.",
-        //     digest,
-        //     payload.size(),
-        //     payload.transactions.len()
-        // );
-        // --- KẾT THÚC LOG THÊM VÀO ---
+        info!(
+            "MempoolCore: Handling own payload {}, size: {}, txs: {}",
+            digest,
+            payload.size(),
+            payload.transactions.len()
+        );
     
         // Drop the transaction if our mempool is full.
         ensure!(
@@ -145,17 +145,17 @@ impl Core {
             MempoolError::MempoolFull
         );
     
-        // Otherwise, try to add the transaction to the next payload
-        // we will add to the queue.
-        // let digest = payload.digest(); // <- Đã di chuyển lên trên
         self.process_own_payload(&digest, payload).await?; //payload存入queue中
         self.queue.insert(digest);
         Ok(())
     }
 
     async fn handle_others_payload(&mut self, payload: Payload) -> MempoolResult<()> {
-        // Ensure the author of the payload is in the committee.
         let author = payload.author;
+        let digest = payload.digest();
+        info!("MempoolCore: Received payload {} from {}", digest, author);
+
+        // Ensure the author of the payload is in the committee.
         ensure!(
             self.committee.exists(&author),
             MempoolError::UnknownAuthority(author)
@@ -168,12 +168,10 @@ impl Core {
         );
 
         // Verify that the payload is correctly signed.
-        let digest = payload.digest();
         payload.signature.verify(&digest, &author)?;
 
         // Store payload.
-        // TODO [issue #18]: A bad node may make us store a lot of junk. There is no
-        // limit to how many payloads they can send us, and we will store them all.
+        info!("MempoolCore: Storing payload {} from {}", digest, author);
         self.store_payload(digest.to_vec(), &payload).await;
 
         // Add the payload to the queue.
