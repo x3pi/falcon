@@ -131,12 +131,12 @@ impl Core {
     async fn handle_own_payload(&mut self, payload: Payload) -> MempoolResult<()> {
         // --- LOG THÊM VÀO ---
         let digest = payload.digest();
-        info!(
-            "Processing new payload {}, size: {} bytes, containing {} transactions.",
-            digest,
-            payload.size(),
-            payload.transactions.len()
-        );
+        // info!(
+        //     "Processing new payload {}, size: {} bytes, containing {} transactions.",
+        //     digest,
+        //     payload.size(),
+        //     payload.transactions.len()
+        // );
         // --- KẾT THÚC LOG THÊM VÀO ---
     
         // Drop the transaction if our mempool is full.

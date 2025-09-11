@@ -1,10 +1,4 @@
-use ed25519_dalek as dalek;
-use ed25519_dalek::ed25519;
-use ed25519_dalek::Signer as _;
-use rand::rngs::OsRng;
-use rand::{CryptoRng, RngCore};
 use serde::{de, ser, Deserialize, Serialize};
-use std::array::TryFromSliceError;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use tokio::sync::mpsc::{channel, Sender};
@@ -13,12 +7,16 @@ use threshold_crypto::{
     PublicKeySet, PublicKeyShare, SecretKeySet, SecretKeyShare, SignatureShare,
 };
 use threshold_crypto::serde_impl::SerdeSecret;
+use sha3::{Digest as Sha3Digest, Keccak256};
+use libsecp256k1::{Message, PublicKey as SecpPublicKey, SecretKey as SecpSecretKey, Signature as EcdsaSignature};
+use rand::rngs::OsRng;
+
 
 #[cfg(test)]
 #[path = "tests/crypto_tests.rs"]
 pub mod crypto_tests;
 
-pub type CryptoError = ed25519::Error;
+pub type CryptoError = libsecp256k1::Error;
 
 #[derive(Hash, PartialEq, Default, Eq, Clone, Deserialize, Serialize)]
 pub struct Digest(pub [u8; 32]);
@@ -52,7 +50,7 @@ impl AsRef<[u8]> for Digest {
 }
 
 impl TryFrom<&[u8]> for Digest {
-    type Error = TryFromSliceError;
+    type Error = std::array::TryFromSliceError;
     fn try_from(item: &[u8]) -> Result<Self, Self::Error> {
         Ok(Digest(item.try_into()?))
     }
@@ -62,8 +60,23 @@ pub trait Hash {
     fn digest(&self) -> Digest;
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Default)]
-pub struct PublicKey(pub [u8; 32]);
+impl Hash for &[u8] {
+    fn digest(&self) -> Digest {
+        let mut hasher = Keccak256::new();
+        hasher.update(self);
+        Digest(hasher.finalize().into())
+    }
+}
+
+// Sử dụng 65 bytes cho public key không nén của secp256k1.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct PublicKey(pub [u8; 65]);
+
+impl Default for PublicKey {
+    fn default() -> Self {
+        PublicKey([0; 65])
+    }
+}
 
 impl PublicKey {
     pub fn to_base64(&self) -> String {
@@ -72,10 +85,24 @@ impl PublicKey {
 
     pub fn from_base64(s: &str) -> Result<Self, base64::DecodeError> {
         let bytes = base64::decode(s)?;
-        let array = bytes[..32]
+        let array = bytes[..65]
             .try_into()
             .map_err(|_| base64::DecodeError::InvalidLength)?;
         Ok(Self(array))
+    }
+
+    /// Chuyển đổi khóa công khai thành địa chỉ ví Ethereum.
+    pub fn to_address(&self) -> String {
+        let mut hasher = Keccak256::new();
+        // Băm khóa công khai (bỏ qua byte tiền tố 0x04).
+        hasher.update(&self.0[1..]);
+        let hash = hasher.finalize();
+
+        // Lấy 20 byte cuối của kết quả băm.
+        let address_bytes = &hash[hash.len() - 20..];
+
+        // Định dạng thành chuỗi hex với tiền tố "0x".
+        format!("0x{}", hex::encode(address_bytes))
     }
 }
 
@@ -111,7 +138,8 @@ impl<'de> Deserialize<'de> for PublicKey {
     }
 }
 
-pub struct SecretKey([u8; 64]);
+// Sử dụng 32 bytes cho secp256k1 secret key.
+pub struct SecretKey(pub [u8; 32]);
 
 impl SecretKey {
     pub fn to_base64(&self) -> String {
@@ -120,7 +148,7 @@ impl SecretKey {
 
     pub fn from_base64(s: &str) -> Result<Self, base64::DecodeError> {
         let bytes = base64::decode(s)?;
-        let array = bytes[..64]
+        let array = bytes[..32]
             .try_into()
             .map_err(|_| base64::DecodeError::InvalidLength)?;
         Ok(Self(array))
@@ -154,60 +182,77 @@ impl Drop for SecretKey {
 }
 
 pub fn generate_production_keypair() -> (PublicKey, SecretKey) {
-    generate_keypair(&mut OsRng)
+    generate_keypair()
 }
 
-pub fn generate_keypair<R>(csprng: &mut R) -> (PublicKey, SecretKey)
-where
-    R: CryptoRng + RngCore,
-{
-    let keypair = dalek::Keypair::generate(csprng);
-    let public = PublicKey(keypair.public.to_bytes());
-    let secret = SecretKey(keypair.to_bytes());
-    (public, secret)
+pub fn generate_keypair() -> (PublicKey, SecretKey) {
+    let secret = SecpSecretKey::random(&mut OsRng);
+    let public = SecpPublicKey::from_secret_key(&secret);
+    (PublicKey(public.serialize()), SecretKey(secret.serialize()))
 }
 
-#[derive(Serialize, Deserialize, Clone, Default, Debug)]
-pub struct Signature {
-    part1: [u8; 32],
-    part2: [u8; 32],
+// Chữ ký secp256k1 được tuần tự hóa thành 64 bytes.
+#[derive(Clone, Debug)]
+pub struct Signature(pub [u8; 64]);
+
+impl Default for Signature {
+    fn default() -> Self {
+        Signature([0; 64])
+    }
 }
 
 impl Signature {
-    pub fn new(digest: &Digest, secret: &SecretKey) -> Self {
-        let keypair = dalek::Keypair::from_bytes(&secret.0).expect("Unable to load secret key");
-        let sig = keypair.sign(&digest.0).to_bytes();
-        let part1 = sig[..32].try_into().expect("Unexpected signature length");
-        let part2 = sig[32..64].try_into().expect("Unexpected signature length");
-        Signature { part1, part2 }
+    pub fn to_base64(&self) -> String {
+        base64::encode(&self.0[..])
     }
 
-    fn flatten(&self) -> [u8; 64] {
-        [self.part1, self.part2]
-            .concat()
+    pub fn from_base64(s: &str) -> Result<Self, base64::DecodeError> {
+        let bytes = base64::decode(s)?;
+        let array = bytes[..64]
             .try_into()
-            .expect("Unexpected signature length")
+            .map_err(|_| base64::DecodeError::InvalidLength)?;
+        Ok(Self(array))
+    }
+
+    pub fn new(digest: &Digest, secret: &SecretKey) -> Self {
+        let secret_key = SecpSecretKey::parse(&secret.0).expect("Unable to load secret key");
+        let message = Message::parse(&digest.0);
+        let signature = libsecp256k1::sign(&message, &secret_key);
+        Self(signature.0.serialize())
     }
 
     pub fn verify(&self, digest: &Digest, public_key: &PublicKey) -> Result<(), CryptoError> {
-        let signature = ed25519::signature::Signature::from_bytes(&self.flatten())?;
-        let key = dalek::PublicKey::from_bytes(&public_key.0)?;
-        key.verify_strict(&digest.0, &signature)
-    }
+        let signature = EcdsaSignature::parse_standard_slice(&self.0)
+            .map_err(|_| CryptoError::InvalidSignature)?;
+        let public_key = SecpPublicKey::parse_slice(&public_key.0, None)
+            .map_err(|_| CryptoError::InvalidPublicKey)?;
+        let message = Message::parse(&digest.0);
 
-    pub fn verify_batch<'a, I>(digest: &Digest, votes: I) -> Result<(), CryptoError>
-    where
-        I: IntoIterator<Item = &'a (PublicKey, Signature)>,
-    {
-        let mut messages: Vec<&[u8]> = Vec::new();
-        let mut signatures: Vec<dalek::Signature> = Vec::new();
-        let mut keys: Vec<dalek::PublicKey> = Vec::new();
-        for (key, sig) in votes.into_iter() {
-            messages.push(&digest.0[..]);
-            signatures.push(ed25519::signature::Signature::from_bytes(&sig.flatten())?);
-            keys.push(dalek::PublicKey::from_bytes(&key.0)?);
+        if libsecp256k1::verify(&message, &signature, &public_key) {
+            Ok(())
+        } else {
+            Err(CryptoError::InvalidSignature)
         }
-        dalek::verify_batch(&messages[..], &signatures[..], &keys[..])
+    }
+}
+
+impl Serialize for Signature {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        serializer.serialize_str(&self.to_base64())
+    }
+}
+
+impl<'de> Deserialize<'de> for Signature {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let value = Self::from_base64(&s).map_err(|e| de::Error::custom(e.to_string()))?;
+        Ok(value)
     }
 }
 
