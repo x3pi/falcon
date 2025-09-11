@@ -48,8 +48,16 @@ impl Node {
         let committee = Committee::read(committee_file)?;
         info!("committee {:?}", committee);
         let secret = Secret::read(key_file)?;
-        let name = secret.name; //公钥做为ID
-        let secret_key = secret.secret;
+        let name = secret.name; // This is the public key, used as node ID.
+
+        // Derive the wallet address directly from the secret key for verification.
+        let public_key_from_secret = secret.secret.to_public();
+        let address = public_key_from_secret.to_address();
+
+        // Security check: ensure the public key in the file matches the derived one.
+        assert_eq!(name.0, public_key_from_secret.0, "Public key in keyfile does not match the one derived from the secret key!");
+        
+        let secret_key = secret.secret; // The secret key will be moved later.
         let tss_keys = SecretShare::read(tss_file)?;
         let pk_set = tss_keys.pkset.clone();
 
@@ -103,6 +111,7 @@ impl Node {
         .await?;
 
         info!("Node {} successfully booted", name);
+        info!("Wallet Address: {}", address); // Log the derived address.
         Ok(Self { commit: rx_commit })
     }
 

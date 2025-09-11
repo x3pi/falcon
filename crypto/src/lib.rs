@@ -153,6 +153,13 @@ impl SecretKey {
             .map_err(|_| base64::DecodeError::InvalidLength)?;
         Ok(Self(array))
     }
+
+    /// Suy ra khóa công khai từ khóa bí mật.
+    pub fn to_public(&self) -> PublicKey {
+        let secret_key_secp = SecpSecretKey::parse(&self.0).expect("Failed to parse secret key");
+        let public_key_secp = SecpPublicKey::from_secret_key(&secret_key_secp);
+        PublicKey(public_key_secp.serialize())
+    }
 }
 
 impl Serialize for SecretKey {

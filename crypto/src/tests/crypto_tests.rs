@@ -92,8 +92,12 @@ fn generate_ethereum_address() {
     let public_key_secp = SecpPublicKey::from_secret_key(&secret_key_secp);
 
     let public_key = PublicKey(public_key_secp.serialize());
+    println!("Public Key: {:?}", public_key);
 
-    let expected_address = "0x924897dc867f06a1e3c5579bb0b75df3025d5e9d";
+    let secret_key = SecretKey(secret_key_secp.serialize());
+    println!("Secret Key: {:?}", secret_key);
+    
+    let expected_address = "0x924897dc867f06a1e3c5579bb0b75df3025d5e9dv";
     let calculated_address = public_key.to_address();
 
     assert_eq!(calculated_address, expected_address);
