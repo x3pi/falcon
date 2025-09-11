@@ -1,6 +1,6 @@
 use crate::messages::Transaction;
 use futures::stream::StreamExt as _;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
@@ -46,7 +46,7 @@ impl Front {
                     //接收客户端发送过来的消息 存入client——sender
                     Ok(x) => {
                         // --- LOG THÊM VÀO ---
-                        let tx_size = x.len();
+                        // let tx_size = x.len();
                         // if tx_size > 0 {
                         //     info!(
                         //         "Received transaction from client {}, size: {} bytes. Forwarding to core.",
