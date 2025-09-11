@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 
 pub type Stake = u32;
 pub type EpochNumber = u128;
+pub type SeqNumber = u64; // Dòng này có thể đã có trong consensus/src/core.rs, đảm bảo bạn có import nó
 
 #[derive(Serialize, Deserialize)]
 pub enum Protocol {
@@ -33,6 +34,7 @@ pub struct Parameters {
     pub fault: u64,
     pub exp: u64,
     pub fallback: u64,
+    pub pruning_threshold: SeqNumber, // THÊM DÒNG NÀY
 }
 
 impl Default for Parameters {
@@ -50,6 +52,9 @@ impl Default for Parameters {
             fault: 0,
             exp: 1,
             fallback: 1,
+            pruning_threshold: 1000, // THÊM DÒNG NÀY: Giữ lại 1000 epoch gần nhất làm mặc định
+
+            
         }
     }
 }

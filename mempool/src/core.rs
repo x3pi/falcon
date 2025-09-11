@@ -233,6 +233,8 @@ impl Core {
         self.synchronizer.cleanup(epoch, height).await;
         for x in &digests {
             self.queue.remove(x);
+            self.store.delete(x.to_vec()).await;
+
         }
     }
 

@@ -177,6 +177,22 @@ impl Core {
             .retain(|(e, h, ..), _| e * size + h > rank);
         self.aba_outputs.retain(|(e, h, ..), _| e * size + h > rank);
         // self.aba_ends.retain(|(e, h, ..), _| e * size + h > rank);
+
+        if epoch > self.parameters.pruning_threshold {
+            let prune_epoch = epoch - self.parameters.pruning_threshold;
+            
+            // Xóa các khối trong epoch cũ
+            for h in 0..self.committee.size() as SeqNumber {
+                let rank_to_prune = Self::rank(prune_epoch, h, &self.committee);
+                let key_to_prune: Vec<u8> = rank_to_prune.to_le_bytes().into();
+                self.store.delete(key_to_prune).await;
+            }
+
+            // Dọn dẹp các epoch output cũ trong bộ nhớ
+            self.rbc_epoch_outputs.retain(|e, _| *e >= prune_epoch);
+            debug!("Pruned data from epoch {}", prune_epoch);
+        }
+
         Ok(())
     }
 
