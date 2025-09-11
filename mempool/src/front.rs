@@ -47,14 +47,14 @@ impl Front {
                     Ok(x) => {
                         // --- LOG THÊM VÀO ---
                         let tx_size = x.len();
-                        if tx_size > 0 {
-                            info!(
-                                "Received transaction from client {}, size: {} bytes. Forwarding to core.",
-                                peer, tx_size
-                            );
-                        } else {
-                            warn!("Received empty transaction from client {}.", peer);
-                        }
+                        // if tx_size > 0 {
+                        //     info!(
+                        //         "Received transaction from client {}, size: {} bytes. Forwarding to core.",
+                        //         peer, tx_size
+                        //     );
+                        // } else {
+                        //     warn!("Received empty transaction from client {}.", peer);
+                        // }
                         // --- KẾT THÚC LOG THÊM VÀO ---
 
                         deliver.send(x.to_vec()).await.expect("Core channel closed");
