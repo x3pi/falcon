@@ -1,6 +1,8 @@
+// mempool/src/front.rs
+
 use crate::messages::Transaction;
 use futures::stream::StreamExt as _;
-use log::{debug, warn};
+use log::{debug, warn, info}; // Thêm info
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
@@ -19,7 +21,7 @@ impl Front {
     // For each incoming request, we spawn a new worker responsible to receive
     // messages and replay them through the provided deliver channel.
     pub async fn run(&self) {
-        //监听前端地址
+        //lắng nghe địa chỉ front-end
         let listener = TcpListener::bind(&self.address)
             .await
             .expect("Failed to bind to TCP port");
@@ -43,19 +45,19 @@ impl Front {
             let mut transport = Framed::new(socket, LengthDelimitedCodec::new());
             while let Some(frame) = transport.next().await {
                 match frame {
-                    //接收客户端发送过来的消息 存入client——sender
+                    //nhận tin nhắn được gửi bởi client và lưu vào client_sender
                     Ok(x) => {
-                        // --- LOG THÊM VÀO ---
-                        // let tx_size = x.len();
-                        // if tx_size > 0 {
-                        //     info!(
-                        //         "Received transaction from client {}, size: {} bytes. Forwarding to core.",
-                        //         peer, tx_size
-                        //     );
-                        // } else {
-                        //     warn!("Received empty transaction from client {}.", peer);
-                        // }
-                        // --- KẾT THÚC LOG THÊM VÀO ---
+                        // --- BƯỚC 1: Giao dịch được nhận ---
+                        let tx_size = x.len();
+                        if tx_size > 0 {
+                            info!(
+                                "[BƯỚC 1] Nhận giao dịch từ client {}, kích thước: {} bytes. Chuyển tiếp đến core.",
+                                peer, tx_size
+                            );
+                        } else {
+                            warn!("Nhận giao dịch trống từ client {}.", peer);
+                        }
+                        // --- KẾT THÚC BƯỚC 1 ---
 
                         deliver.send(x.to_vec()).await.expect("Core channel closed");
                     }

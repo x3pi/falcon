@@ -29,13 +29,14 @@ async fn try_to_commit(
         }
     }
     let (mut e, mut h): (SeqNumber, SeqNumber) = (0, 0);
-    let mut committed_block_flag = false; // <-- [THÊM VÀO] Khởi tạo cờ theo dõi commit
+    let mut committed_block_flag = false;
 
-    //向共识层发送可以提交的块
+    //gửi các khối có thể commit đến tầng consensus
     for block in data {
         if !block.payload.is_empty() {
-            info!("Committed {}", block);
-            info!("Block Info {}", block);
+            // --- BƯỚC 5: Khối được commit ---
+            info!("[BƯỚC 5] Committed Block: Epoch: {}, Height: {}, Author: {}, Payload Digests: {}",
+                  block.epoch, block.height, block.author, block.payload.len());
 
             #[cfg(feature = "benchmark")]
             for x in &block.payload {
@@ -50,10 +51,9 @@ async fn try_to_commit(
         }
         debug!("Committed {}", block);
         (e, h) = (block.epoch, block.height);
-        committed_block_flag = true; // <-- [THÊM VÀO] Đánh dấu đã xử lý block
+        committed_block_flag = true;
     }
 
-    // [SỬA ĐỔI] Thay đổi điều kiện kiểm tra từ !digests.is_empty() thành committed_block_flag
     if committed_block_flag {
         if let Err(e) = tx_commit.send((digests, e, h)).await {
             panic!("Failed to filter block to commiter core: {}", e);
@@ -61,7 +61,6 @@ async fn try_to_commit(
     }
     cur_ind
 }
-
 
 pub struct Commitor {
     tx_block: Sender<Block>,

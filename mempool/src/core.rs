@@ -1,3 +1,5 @@
+// mempool/src/core.rs
+
 use crate::config::{Committee, Parameters};
 use crate::error::{MempoolError, MempoolResult};
 use crate::messages::Payload;
@@ -8,7 +10,7 @@ use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
 #[cfg(feature = "benchmark")]
 use log::info;
-use log::{error, warn};
+use log::{error, info, warn};
 use network::NetMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -124,31 +126,29 @@ impl Core {
         self.store_payload(digest.to_vec(), &payload).await;
 
         // Share the payload with all other nodes.
-        let message = MempoolMessage::Payload(payload); //向其他节点发送这个payload
+        let message = MempoolMessage::Payload(payload); //gửi payload này cho các node khác
         self.transmit(&message, None).await
     }
 
     async fn handle_own_payload(&mut self, payload: Payload) -> MempoolResult<()> {
-        // --- LOG THÊM VÀO ---
         let digest = payload.digest();
-        // info!(
-        //     "Processing new payload {}, size: {} bytes, containing {} transactions.",
-        //     digest,
-        //     payload.size(),
-        //     payload.transactions.len()
-        // );
-        // --- KẾT THÚC LOG THÊM VÀO ---
-    
+        // --- BƯỚC 2: Mempool xử lý payload của chính nó ---
+        info!(
+            "[BƯỚC 2] Mempool(OwnPayload) của [{:?}]: Bắt đầu xử lý tải trọng cục bộ {:?} với {} giao dịch.",
+            self.name,
+            digest,
+            payload.transactions.len()
+        );
+
         // Drop the transaction if our mempool is full.
         ensure!(
             self.queue.len() < self.parameters.queue_capacity,
             MempoolError::MempoolFull
         );
-    
+
         // Otherwise, try to add the transaction to the next payload
         // we will add to the queue.
-        // let digest = payload.digest(); // <- Đã di chuyển lên trên
-        self.process_own_payload(&digest, payload).await?; //payload存入queue中
+        self.process_own_payload(&digest, payload).await?; //lưu payload vào queue
         self.queue.insert(digest);
         Ok(())
     }
@@ -169,6 +169,16 @@ impl Core {
 
         // Verify that the payload is correctly signed.
         let digest = payload.digest();
+
+        // --- BƯỚC 2 (PHỤ): Mempool xử lý payload từ node khác ---
+        info!(
+            "[BƯỚC 2 - PHỤ] Mempool(OthersPayload) của [{:?}]: Bắt đầu xử lý tải trọng {:?} từ {:?} với {} giao dịch.",
+            self.name,
+            digest,
+            author,
+            payload.transactions.len()
+        );
+
         payload.signature.verify(&digest, &author)?;
 
         // Store payload.
@@ -207,9 +217,9 @@ impl Core {
             }
         } else {
             let digest_len = Digest::default().size();
-            let digests = self.queue.iter().take(max / digest_len).cloned().collect();
+            let digests: Vec<_> = self.queue.iter().take(max / digest_len).cloned().collect();
             for x in &digests {
-                self.queue.remove(x); //去重
+                self.queue.remove(x); //loại bỏ trùng lặp
             }
             Ok(digests)
         }
@@ -238,20 +248,20 @@ impl Core {
             let result = tokio::select! {
                 Some(message) = self.core_channel.recv() => {
                     match message {
-                        MempoolMessage::OwnPayload(payload) => self.handle_own_payload(payload).await, //处理本地生成的PayLoad,并向其他节点发送payload
-                        MempoolMessage::Payload(payload) => self.handle_others_payload(payload).await,  //将其他人发送过来的payload存入本地
-                        MempoolMessage::PayloadRequest(digest, sender) => self.handle_request(digest, sender).await,    //返回digest对应的payload
+                        MempoolMessage::OwnPayload(payload) => self.handle_own_payload(payload).await, //xử lý PayLoad được tạo cục bộ và gửi payload cho các node khác
+                        MempoolMessage::Payload(payload) => self.handle_others_payload(payload).await,  //lưu payload được gửi từ người khác vào cục bộ
+                        MempoolMessage::PayloadRequest(digest, sender) => self.handle_request(digest, sender).await,    //trả về payload tương ứng với digest
                     }
                 },
-                Some(message) = self.consensus_channel.recv() => {//处理共识发送的Payload请求
+                Some(message) = self.consensus_channel.recv() => {//xử lý yêu cầu Payload được gửi bởi consensus
                     match message {
                         ConsensusMempoolMessage::Get(max, sender) => {
                             let result = self.get_payload(max).await;
                             log(result.as_ref().map(|_| &()));
                             let _ = sender.send(result.unwrap_or_default());
                         },
-                        ConsensusMempoolMessage::Verify(block, sender) => {//验证区块中所包含的payload是否在本地都有
-                            let result = self.verify_payload(block).await;//如果没有，则向其他节点发送request
+                        ConsensusMempoolMessage::Verify(block, sender) => {//xác minh xem các payload có trong khối có phải là cục bộ không
+                            let result = self.verify_payload(block).await;//nếu không, gửi yêu cầu đến các node khác
                             log(result.as_ref().map(|_| &()));
                             let status = match result {
                                 Ok(true) => PayloadStatus::Accept,
