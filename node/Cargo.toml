@@ -32,4 +32,3 @@ benchmark = ["consensus/benchmark", "mempool/benchmark"]
 [[bin]]         
 name = "client"   
 path = "src/client.rs" 
-required-features = ["benchmark"] 
