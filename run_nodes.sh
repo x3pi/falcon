@@ -46,6 +46,9 @@ PARAMETERS_FILE="$BENCHMARK_DIR/.parameters.json"
 # ==============================================================================
 # SCRIPT EXECUTION
 # ==============================================================================
+# --- Stage 0: Build ---
+cargo clean
+cargo build --release
 
 # --- Giai đoạn 1: Dọn dẹp và Kiểm tra ---
 echo "--- Stage 1: Cleanup and Preparation ---"
@@ -74,6 +77,7 @@ for bin in "$NODE_BINARY" "$CLIENT_BINARY"; do
         exit 1
     fi
 done
+
 
 # --- Giai đoạn 2: Tạo Cấu hình ---
 echo ""
