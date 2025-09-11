@@ -6,7 +6,7 @@ use crypto::Digest;
 use log::{debug, info};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-pub const MAX_BLOCK_BUFFER: usize = 100000;
+pub const MAX_BLOCK_BUFFER: usize = 20000;
 
 async fn try_to_commit(
     mut cur_ind: usize,
