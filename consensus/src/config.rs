@@ -20,6 +20,11 @@ impl Default for Protocol {
     }
 }
 
+
+fn default_pruning_threshold() -> SeqNumber {
+    1000
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Parameters {
     pub sync_timeout: u64,
@@ -34,6 +39,7 @@ pub struct Parameters {
     pub fault: u64,
     pub exp: u64,
     pub fallback: u64,
+    #[serde(default = "default_pruning_threshold")]
     pub pruning_threshold: SeqNumber, // THÊM DÒNG NÀY
 }
 
@@ -52,7 +58,7 @@ impl Default for Parameters {
             fault: 0,
             exp: 1,
             fallback: 1,
-            pruning_threshold: 1000, // THÊM DÒNG NÀY: Giữ lại 1000 epoch gần nhất làm mặc định
+            pruning_threshold: default_pruning_threshold(),
 
             
         }
