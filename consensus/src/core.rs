@@ -695,101 +695,84 @@ impl Core {
             "processing aba mux epoch {} height {}",
             aba_mux.epoch, aba_mux.height
         );
+        // 1. Xác thực tin nhắn
         aba_mux.verify()?;
-        let values = self
-            .aba_mux_values
-            .entry((aba_mux.epoch, aba_mux.height, aba_mux.round))
-            .or_insert([HashSet::new(), HashSet::new()]);
-
-
-        if let Some(start_time) = self.aba_timeouts.get(&(aba_mux.epoch, aba_mux.height)) {
-            // Đặt thời gian chờ, ví dụ gấp đôi timeout_delay cơ bản
-            let timeout_duration = Duration::from_millis(self.parameters.timeout_delay * 6);
     
-            if start_time.elapsed() > timeout_duration && !*self.aba_ends.entry((aba_mux.epoch, aba_mux.height)).or_insert(false) {
+        // Nếu phiên ABA này đã kết thúc, bỏ qua tin nhắn để tránh xử lý thừa
+        if *self.aba_ends.entry((aba_mux.epoch, aba_mux.height)).or_insert(false) {
+            return Ok(());
+        }
+    
+        // 2. Xử lý timeout để phá vỡ bế tắc (Deadlock Prevention)
+        if let Some(start_time) = self.aba_timeouts.get(&(aba_mux.epoch, aba_mux.height)) {
+            let timeout_duration = Duration::from_millis(self.parameters.timeout_delay * 2);
+            if start_time.elapsed() > timeout_duration {
                 warn!(
                     "ABA TIMEOUT on epoch {}, height {}, round {}. Deterministically choosing 1 (OPT) to break deadlock.",
                     aba_mux.epoch, aba_mux.height, aba_mux.round
                 );
     
-                // Xóa timeout để tránh kích hoạt lại
-                self.aba_timeouts.remove(&(aba_mux.epoch, aba_mux.height));
-    
-                // Buộc chuyển sang vòng tiếp theo với giá trị mặc định là 1 (OPT)
-                self.aba_adcance_round(
-                    aba_mux.epoch,
-                    aba_mux.height,
-                    aba_mux.round + 1,
-                    OPT as usize,
-                )
-                .await?;
-    
-                return Ok(()); // Thoát khỏi hàm để tránh xử lý logic quorum bên dưới
+                // Khi timeout, buộc kết thúc ABA với giá trị mặc định là 1 (OPT)
+                return self.process_aba_output(aba_mux.epoch, aba_mux.height, aba_mux.round, OPT as usize).await;
             }
         }
-            
-
-        if values[aba_mux.val].insert(aba_mux.author) {
-            let mux_flags = self
-                .aba_mux_flags
-                .entry((aba_mux.epoch, aba_mux.height, aba_mux.round))
-                .or_insert([false, false]);
-
-            if !mux_flags[PES as usize] && !mux_flags[OPT as usize] {
-                let nums_opt = values[OPT as usize].len();
-                let nums_pes = values[PES as usize].len();
-                if nums_opt + nums_pes >= self.committee.quorum_threshold() as usize {
-                    let value_flags = self
-                        .aba_values_flag
-                        .entry((aba_mux.epoch, aba_mux.height, aba_mux.round))
-                        .or_insert([false, false]);
-                    if value_flags[PES as usize] && value_flags[OPT as usize] {
-                        mux_flags[OPT as usize] = nums_opt > 0;
-                        mux_flags[PES as usize] = nums_pes > 0;
-                    } else if value_flags[OPT as usize] {
-                        mux_flags[OPT as usize] =
-                            nums_opt >= self.committee.quorum_threshold() as usize;
-                    } else {
-                        mux_flags[PES as usize] =
-                            nums_pes >= self.committee.quorum_threshold() as usize;
-                    }
-                }
-
-                if mux_flags[PES as usize] || mux_flags[OPT as usize] {
-                    // Mạng đã có đủ bằng chứng cho ít nhất một giá trị.
-                    // Bỏ qua common coin và áp dụng quy tắc xác định.
-                    
-                    let mut final_value = OPT as usize; // Mặc định là 1 (OPT)
-
-                    if mux_flags[OPT as usize] && mux_flags[PES as usize] {
-                        // TRƯỜNG HỢP BẾ TẮC: Cả hai giá trị đều có thể.
-                        // Ghi log và chọn giá trị mặc định đã định.
-                        warn!(
-                            "ABA DEADLOCK on epoch {}, height {}, round {}. Deterministically choosing 1 (OPT).",
-                            aba_mux.epoch, aba_mux.height, aba_mux.round
-                        );
-                        self.log_deadlock_to_file(aba_mux.epoch, aba_mux.height, aba_mux.round);
-
-                    } else if !mux_flags[OPT as usize] && mux_flags[PES as usize] {
-                        // Nếu chỉ có bằng chứng cho 0, thì phải chọn 0.
-                        final_value = PES as usize;
-                    }
-                    // (Trường hợp còn lại là chỉ có bằng chứng cho 1, giữ nguyên giá trị mặc định)
-
-                    // Chuyển sang vòng ABA tiếp theo với giá trị đã quyết định.
-                    self.aba_adcance_round(
-                        aba_mux.epoch,
-                        aba_mux.height,
-                        aba_mux.round + 1,
-                        final_value,
-                    )
-                    .await?;
-                }
+    
+        // 3. Tổng hợp các phiếu bầu (mux votes)
+        let mux_votes = self
+            .aba_mux_values
+            .entry((aba_mux.epoch, aba_mux.height, aba_mux.round))
+            .or_insert_with(|| [HashSet::new(), HashSet::new()]);
+    
+        // Bỏ qua phiếu đã được xử lý
+        if !mux_votes[aba_mux.val].insert(aba_mux.author) {
+            return Ok(());
+        }
+    
+        let num_opt_votes = mux_votes[OPT as usize].len() as Stake;
+        let num_pes_votes = mux_votes[PES as usize].len() as Stake;
+        
+        let val_flags = self
+            .aba_values_flag
+            .entry((aba_mux.epoch, aba_mux.height, aba_mux.round))
+            .or_insert([false, false]);
+    
+        let mut decision: Option<usize> = None;
+    
+        // 4. Logic Quyết Định Kết Thúc (Termination Logic) - Trái tim của việc sửa lỗi
+        
+        // Trường hợp 1: Đạt được quorum cho một giá trị duy nhất -> Ra quyết định ngay lập tức
+        if num_opt_votes >= self.committee.quorum_threshold() {
+            decision = Some(OPT as usize);
+        } else if num_pes_votes >= self.committee.quorum_threshold() {
+            decision = Some(PES as usize);
+        }
+        // Trường hợp 2: Tổng số phiếu đạt quorum nhưng bị chia rẽ.
+        else if num_opt_votes + num_pes_votes >= self.committee.quorum_threshold() {
+            // Nếu trước đó đã có bằng chứng cho cả hai giá trị ('val' phase)
+            if val_flags[OPT as usize] && val_flags[PES as usize] {
+                 // Ưu tiên OPT để đảm bảo tính sống (liveness)
+                 decision = Some(OPT as usize);
+            } 
+            // Nếu trước đó chỉ có bằng chứng cho một giá trị, quyết định theo giá trị đó
+            else if val_flags[OPT as usize] {
+                decision = Some(OPT as usize);
+            } else if val_flags[PES as usize] {
+                decision = Some(PES as usize);
             }
         }
-
+    
+        // 5. Hành Động Dứt Khoát
+        if let Some(decided_value) = decision {
+            // Đã có quyết định! Gọi process_aba_output để kết thúc phiên ABA này.
+            // Đây là thay đổi quan trọng nhất để ngăn vòng lặp vô hạn.
+            return self.process_aba_output(aba_mux.epoch, aba_mux.height, aba_mux.round, decided_value).await;
+        }
+    
+        // Nếu vẫn chưa đủ điều kiện, tiếp tục chờ thêm tin nhắn.
         Ok(())
     }
+
+    
 
     // async fn handle_aba_share(&mut self, share: &RandomnessShare) -> ConsensusResult<()> {
     //     debug!(
