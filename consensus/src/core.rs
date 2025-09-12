@@ -15,7 +15,6 @@ use crypto::{Digest, PublicKey, SignatureService};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use store::Store;
-use threshold_crypto::PublicKeySet;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{sleep, Duration};
 #[cfg(test)]
@@ -58,7 +57,6 @@ pub struct Core {
     parameters: Parameters,
     store: Store,
     signature_service: SignatureService,
-    pk_set: PublicKeySet,
     mempool_driver: MempoolDriver,
     synchronizer: Synchronizer,
     _tx_core: Sender<ConsensusMessage>,
@@ -91,7 +89,6 @@ impl Core {
         committee: Committee,
         parameters: Parameters,
         signature_service: SignatureService,
-        pk_set: PublicKeySet,
         store: Store,
         mempool_driver: MempoolDriver,
         synchronizer: Synchronizer,
@@ -111,7 +108,6 @@ impl Core {
             committee,
             parameters,
             signature_service,
-            pk_set,
             store,
             mempool_driver,
             synchronizer,

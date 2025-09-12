@@ -59,7 +59,6 @@ impl Node {
         
         let secret_key = secret.secret; // The secret key will be moved later.
         let tss_keys = SecretShare::read(tss_file)?;
-        let pk_set = tss_keys.pkset.clone();
 
         // Load default parameters if none are specified.
         let parameters = match parameters {
@@ -101,7 +100,6 @@ impl Node {
             parameters.consensus,
             store.clone(),
             signature_service,
-            pk_set,
             tx_consensus,
             rx_consensus,
             tx_consensus_mempool,

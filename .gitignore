@@ -19,3 +19,4 @@ benchmark/node
 benchmark/.node-*.json
 benchmark/.committee.json
 benchmark/.parameters.json
+aba_deadlocks.log

@@ -8,7 +8,6 @@ use ed25519_dalek::Sha512;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::fmt;
-use threshold_crypto::{PublicKeySet, SignatureShare};
 
 #[cfg(test)]
 #[path = "tests/messages_tests.rs"]
