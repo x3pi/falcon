@@ -38,6 +38,11 @@ impl Synchronizer {
         let (tx_inner, mut rx_inner): (_, Receiver<(SeqNumber, SeqNumber)>) = channel(10000);
 
         let store_copy = store.clone();
+        
+        // --- BƯỚC 1: TẠO BẢN SAO CỦA KÊNH ---
+        // Clone `core_channel` để có thể di chuyển bản sao vào trong tokio::spawn
+        let core_channel_clone = core_channel.clone(); 
+        
         tokio::spawn(async move {
             let mut waiting = FuturesUnordered::new();
             let mut pending = HashSet::new();
@@ -49,8 +54,7 @@ impl Synchronizer {
                 tokio::select! {
                     Some((epoch,height)) = rx_inner.recv() => {
                         if pending.insert((epoch,height)) {
-
-                            let fut = Self::waiter(store_copy.clone(),epoch,height,&committee);
+                            let fut = Self::waiter(store_copy.clone(), epoch, height, &committee);
                             waiting.push(fut);
 
                             if !requests.contains_key(&(epoch,height)){
@@ -73,6 +77,8 @@ impl Synchronizer {
                             
                             let message = ConsensusMessage::LoopBackMsg(block);
                             
+                            // --- BƯỚC 2: SỬ DỤNG BẢN SAO ---
+                            // Sử dụng `core_channel_clone` ở đây
                             match core_channel_clone.try_send(message) {
                                 Ok(()) => (),
                                 Err(TrySendError::Full(_)) => {
@@ -86,7 +92,6 @@ impl Synchronizer {
                         Err(e) => error!("{}", e)
                     },
                     () = &mut timer => {
-                        // This implements the 'perfect point to point link' abstraction.
                         for ((epoch,height), timestamp) in &requests {
                             let now = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
@@ -94,7 +99,7 @@ impl Synchronizer {
                                 .as_millis();
                             if timestamp + (sync_retry_delay as u128) < now {
                                 debug!("Requesting sync for block epoch {}, height {}", epoch,height);
-                                let message = ConsensusMessage::SyncRequestMsg(*epoch,*height, name);///////////////?
+                                let message = ConsensusMessage::SyncRequestMsg(*epoch,*height, name);
                                 Self::transmit(message, &name, None, &network_filter, &committee).await.unwrap();
                             }
                         }
