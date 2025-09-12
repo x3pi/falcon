@@ -59,7 +59,9 @@ pkill -f "$NODE_BINARY" || true
 pkill -f "$CLIENT_BINARY" || true
 sleep 1
 
+
 echo "INFO: Cleaning up old files..."
+rm -r aba_deadlocks.log
 rm -rf "$LOG_DIR" "$BENCHMARK_DIR"/db_* "$BENCHMARK_DIR"/.node* "$COMMITTEE_FILE" "$PARAMETERS_FILE"
 mkdir -p "$LOG_DIR"
 

@@ -49,14 +49,14 @@ impl Front {
                     Ok(x) => {
                         // --- BƯỚC 1: Giao dịch được nhận ---
                         let tx_size = x.len();
-                        if tx_size > 0 {
-                            info!(
-                                "[BƯỚC 1] Nhận giao dịch từ client {}, kích thước: {} bytes. Chuyển tiếp đến core.",
-                                peer, tx_size
-                            );
-                        } else {
-                            warn!("Nhận giao dịch trống từ client {}.", peer);
-                        }
+                        // if tx_size > 0 {
+                        //     info!(
+                        //         "[BƯỚC 1] Nhận giao dịch từ client {}, kích thước: {} bytes. Chuyển tiếp đến core.",
+                        //         peer, tx_size
+                        //     );
+                        // } else {
+                        //     warn!("Nhận giao dịch trống từ client {}.", peer);
+                        // }
                         // --- KẾT THÚC BƯỚC 1 ---
 
                         deliver.send(x.to_vec()).await.expect("Core channel closed");
