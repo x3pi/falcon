@@ -4,6 +4,7 @@ use crypto::{PublicKey, SignatureService};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Duration};
+use log::info; // Thêm dòng này
 
 struct Runner {
     transactions: Vec<Transaction>,
@@ -64,25 +65,34 @@ impl Runner {
     }
 
     async fn run(&mut self) {
+        info!("[PayloadRunner] Vòng lặp cho node {} bắt đầu.", self.name);
         loop {
             tokio::select! {
                 Some(transaction) = self.client_channel.recv() => {
+                    info!("[PayloadRunner] Đã nhận giao dịch từ client.");
                     if let Some(payload) = self.add(transaction).await {
+                        info!("[PayloadRunner] Payload đã đầy, gửi đến core.");
                         let message = MempoolMessage::OwnPayload(payload);
                         if let Err(e) = self.core_channel.send(message).await {
-                            panic!("Failed to send payload to the core: {}", e);
+                            panic!("Không thể gửi payload đến core: {}", e);
                         }
 
-                        // Wait for the minimum block delay.
+                        // Chờ một khoảng thời gian tối thiểu.
                         sleep(Duration::from_millis(self.min_block_delay)).await;
                     }
                 },
                 Some(sender) = self.request_channel.recv() => {
+                    info!("[PayloadRunner] Nhận yêu cầu tạo payload từ consensus.");
                     let _ = sender.send(self.make().await);
                 },
-                else => break,
+                else => {
+                    // Nhánh này được thực thi khi tất cả các kênh đã đóng.
+                    break;
+                }
             }
         }
+        // Dòng này chỉ được thực thi nếu vòng lặp bị phá vỡ.
+        panic!("[PayloadRunner] Vòng lặp cho node {} đã dừng đột ngột!", self.name);
     }
 }
 

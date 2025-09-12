@@ -2,7 +2,7 @@
 
 use crate::messages::Transaction;
 use futures::stream::StreamExt as _;
-use log::{debug, warn, info}; // Thêm info
+use log::{debug, warn}; // Thêm info
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
@@ -48,7 +48,7 @@ impl Front {
                     //nhận tin nhắn được gửi bởi client và lưu vào client_sender
                     Ok(x) => {
                         // --- BƯỚC 1: Giao dịch được nhận ---
-                        let tx_size = x.len();
+                        // let tx_size = x.len();
                         // if tx_size > 0 {
                         //     info!(
                         //         "[BƯỚC 1] Nhận giao dịch từ client {}, kích thước: {} bytes. Chuyển tiếp đến core.",
