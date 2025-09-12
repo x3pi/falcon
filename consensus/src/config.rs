@@ -50,7 +50,7 @@ impl Default for Parameters {
             timeout_delay: 5000,
             sync_retry_delay: 10_000,
             min_block_delay: 100,
-            network_delay: 100,
+            network_delay: 200,
             max_payload_size: 500,
             ddos: false,
             random_ddos: false,

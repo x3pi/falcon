@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{sleep, Duration};
+use tokio::time::Instant;
+
 #[cfg(test)]
 #[path = "tests/core_tests.rs"]
 pub mod core_tests;
@@ -80,6 +82,8 @@ pub struct Core {
     aba_mux_flags: HashMap<(SeqNumber, SeqNumber, SeqNumber), [bool; 2]>,
     aba_outputs: HashMap<(SeqNumber, SeqNumber, SeqNumber), HashSet<PublicKey>>,
     aba_ends: HashMap<(SeqNumber, SeqNumber), bool>,
+    aba_timeouts: HashMap<(SeqNumber, SeqNumber), Instant>,
+
 }
 
 impl Core {
@@ -129,6 +133,7 @@ impl Core {
             aba_mux_flags: HashMap::new(),
             aba_outputs: HashMap::new(),
             aba_ends: HashMap::new(),
+            aba_timeouts: HashMap::new(), // <-- THÊM DÒNG NÀY
         }
     }
 
@@ -540,6 +545,8 @@ impl Core {
                     .await?;
                     self.handle_prepare(&pre2).await?;
                 } else if prepare.phase == PRE_TWO {
+                    self.aba_timeouts.insert((prepare.epoch, prepare.height), Instant::now());
+
                     //发送ABA
                     let aba_val = ABAVal::new(
                         self.name,
@@ -693,6 +700,35 @@ impl Core {
             .aba_mux_values
             .entry((aba_mux.epoch, aba_mux.height, aba_mux.round))
             .or_insert([HashSet::new(), HashSet::new()]);
+
+
+        if let Some(start_time) = self.aba_timeouts.get(&(aba_mux.epoch, aba_mux.height)) {
+            // Đặt thời gian chờ, ví dụ gấp đôi timeout_delay cơ bản
+            let timeout_duration = Duration::from_millis(self.parameters.timeout_delay * 6);
+    
+            if start_time.elapsed() > timeout_duration && !*self.aba_ends.entry((aba_mux.epoch, aba_mux.height)).or_insert(false) {
+                warn!(
+                    "ABA TIMEOUT on epoch {}, height {}, round {}. Deterministically choosing 1 (OPT) to break deadlock.",
+                    aba_mux.epoch, aba_mux.height, aba_mux.round
+                );
+    
+                // Xóa timeout để tránh kích hoạt lại
+                self.aba_timeouts.remove(&(aba_mux.epoch, aba_mux.height));
+    
+                // Buộc chuyển sang vòng tiếp theo với giá trị mặc định là 1 (OPT)
+                self.aba_adcance_round(
+                    aba_mux.epoch,
+                    aba_mux.height,
+                    aba_mux.round + 1,
+                    OPT as usize,
+                )
+                .await?;
+    
+                return Ok(()); // Thoát khỏi hàm để tránh xử lý logic quorum bên dưới
+            }
+        }
+            
+
         if values[aba_mux.val].insert(aba_mux.author) {
             let mux_flags = self
                 .aba_mux_flags
