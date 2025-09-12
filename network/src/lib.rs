@@ -10,6 +10,7 @@ use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use tokio::sync::mpsc::error::TrySendError;
 
 #[cfg(test)]
 #[path = "tests/network_tests.rs"]
@@ -129,10 +130,22 @@ impl<Message: 'static + Send + DeserializeOwned + Debug> NetReceiver<Message> {
                 {
                     Ok(message) => {
                         debug!("Received {:?}", message);
-                        deliver
-                            .send(message)
-                            .await
-                            .expect("Failed to deliver message");
+                        
+                        // THAY ĐỔI
+                        if let Err(e) = deliver.try_send(message) {
+                            match e {
+                                TrySendError::Full(_) => {
+                                    // Ghi log thay vì panic để không làm sập toàn bộ node chỉ vì một kênh bị đầy
+                                    warn!("[DEADLOCK-WARN] Kênh deliver từ NetReceiver đến Core đã đầy! Core có thể đang bị kẹt. Đóng kết nối từ {}.", peer);
+                                    // Đóng kết nối để giải phóng tài nguyên và cho phép thử lại sau.
+                                    return; 
+                                },
+                                TrySendError::Closed(_) => {
+                                    warn!("[WARN] Kênh deliver từ NetReceiver đến Core đã bị đóng. Đóng kết nối từ {}.", peer);
+                                    return;
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         warn!("{}", e);

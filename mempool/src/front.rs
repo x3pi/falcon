@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use tokio::sync::mpsc::error::TrySendError;
 
 pub struct Front {
     address: SocketAddr,
@@ -45,21 +46,21 @@ impl Front {
             let mut transport = Framed::new(socket, LengthDelimitedCodec::new());
             while let Some(frame) = transport.next().await {
                 match frame {
-                    //nhận tin nhắn được gửi bởi client và lưu vào client_sender
                     Ok(x) => {
-                        // --- BƯỚC 1: Giao dịch được nhận ---
-                        // let tx_size = x.len();
-                        // if tx_size > 0 {
-                        //     info!(
-                        //         "[BƯỚC 1] Nhận giao dịch từ client {}, kích thước: {} bytes. Chuyển tiếp đến core.",
-                        //         peer, tx_size
-                        //     );
-                        // } else {
-                        //     warn!("Nhận giao dịch trống từ client {}.", peer);
-                        // }
-                        // --- KẾT THÚC BƯỚC 1 ---
-
-                        deliver.send(x.to_vec()).await.expect("Core channel closed");
+                        // THAY ĐỔI
+                        if let Err(e) = deliver.try_send(x.to_vec()) {
+                            match e {
+                                TrySendError::Full(_) => {
+                                    warn!("[BACK-PRESSURE] Kênh deliver từ Front đến PayloadRunner đã đầy. Từ chối giao dịch từ {}.", peer);
+                                    // Đóng kết nối để báo cho client biết rằng node đang bị quá tải.
+                                    return;
+                                },
+                                TrySendError::Closed(_) => {
+                                    warn!("[WARN] Kênh deliver từ Front đến PayloadRunner đã bị đóng.");
+                                    return;
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         warn!("Failed to receive client transaction: {}", e);
