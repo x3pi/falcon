@@ -1,10 +1,11 @@
 use crate::core::MempoolMessage;
 use crate::messages::{Payload, Transaction};
 use crypto::{PublicKey, SignatureService};
+use log::info; // Thêm dòng này
+use tokio::sync::mpsc::error::TrySendError; // <-- BƯỚC 1: Import lỗi TrySendError
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Duration};
-use log::info; // Thêm dòng này
 
 struct Runner {
     transactions: Vec<Transaction>,
@@ -44,7 +45,7 @@ impl Runner {
     async fn add(&mut self, tx: Transaction) -> Option<Payload> {
         let length = tx.len();
         let ret = match self.size + length > self.max_size {
-            //如果Vec满了就生成一个payload
+            //Nếu Vec đầy thì tạo một payload
             true => Some(self.make().await),
             false => None,
         };
@@ -57,10 +58,10 @@ impl Runner {
     async fn make(&mut self) -> Payload {
         let transactions = self.transactions.drain(..).collect();
 
-        // Cleanup state.
+        // Dọn dẹp trạng thái.
         self.size = 0;
 
-        // Make a payload.
+        // Tạo một payload.
         Payload::new(transactions, self.name, self.signature_service.clone()).await
     }
 
@@ -73,9 +74,23 @@ impl Runner {
                     if let Some(payload) = self.add(transaction).await {
                         info!("[PayloadRunner] Payload đã đầy, gửi đến core.");
                         let message = MempoolMessage::OwnPayload(payload);
-                        if let Err(e) = self.core_channel.send(message).await {
-                            panic!("Không thể gửi payload đến core: {}", e);
+
+                        // --- BƯỚC 2: THAY ĐỔI LOGIC GỬI ---
+                        // Sử dụng try_send để gửi ngay lập tức mà không chờ đợi.
+                        match self.core_channel.try_send(message) {
+                            Ok(()) => {
+                                // Gửi thành công, không cần làm gì thêm.
+                            },
+                            Err(TrySendError::Full(_)) => {
+                                // Kênh đã đầy -> Gây ra PANIC!
+                                panic!("[PANIC] Kênh từ PayloadRunner đến Core đã đầy! Core có thể đã bị bế tắc.");
+                            },
+                            Err(TrySendError::Closed(_)) => {
+                                // Kênh đã bị đóng (phía nhận đã bị hủy).
+                                panic!("[PANIC] Kênh từ PayloadRunner đến Core đã bị đóng! Core đã kết thúc đột ngột.");
+                            }
                         }
+                        // --- KẾT THÚC THAY ĐỔI ---
 
                         // Chờ một khoảng thời gian tối thiểu.
                         sleep(Duration::from_millis(self.min_block_delay)).await;

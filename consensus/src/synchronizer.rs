@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{sleep, Duration, Instant};
+use tokio::sync::mpsc::error::TrySendError; // Thêm dòng này vào đầu file
 
 #[cfg(test)]
 #[path = "tests/synchronizer_tests.rs"]
@@ -70,10 +71,16 @@ impl Synchronizer {
                             let _ = pending.remove(&(block.epoch, block.height));
                             let _ = requests.remove(&(block.epoch, block.height));
                             
-                            // GỬI LẠI KHỐI CHO CORE ĐỂ TIẾP TỤC XỬ LÝ
                             let message = ConsensusMessage::LoopBackMsg(block);
-                            if let Err(e) = core_channel.send(message).await {
-                                panic!("Failed to send LoopBackMsg through core channel: {}", e);
+                            
+                            match core_channel_clone.try_send(message) {
+                                Ok(()) => (),
+                                Err(TrySendError::Full(_)) => {
+                                    panic!("[PANIC] Kênh Loopback từ Synchronizer đến Core đã đầy! Core đang bị quá tải hoặc bế tắc.");
+                                },
+                                Err(TrySendError::Closed(_)) => {
+                                    panic!("[PANIC] Kênh Loopback từ Synchronizer đến Core đã bị đóng!");
+                                }
                             }
                         },
                         Err(e) => error!("{}", e)
