@@ -96,4 +96,8 @@ pub enum ConsensusError {
         rd2: SeqNumber,
         rd3: SeqNumber,
     },
+
+        // THÊM DÒNG NÀY VÀO CUỐI ENUM
+    #[error("Failed to find serialized block for epoch {0}, height {1} in store after sync")]
+    SerializedBlockNotFound(SeqNumber, SeqNumber),
 }

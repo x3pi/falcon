@@ -1,6 +1,7 @@
 use crate::config::Committee;
 use crate::core::{ConsensusMessage, Core};
 use crate::error::ConsensusResult;
+use crate::ConsensusError;
 use crate::filter::FilterInput;
 use crate::{Block, SeqNumber};
 use crypto::PublicKey;
@@ -30,7 +31,7 @@ impl Synchronizer {
         committee: Committee,
         store: Store,
         network_filter: Sender<FilterInput>,
-        _core_channel: Sender<ConsensusMessage>,
+        core_channel: Sender<ConsensusMessage>,
         sync_retry_delay: u64,
     ) -> Self {
         let (tx_inner, mut rx_inner): (_, Receiver<(SeqNumber, SeqNumber)>) = channel(10000);
@@ -64,14 +65,16 @@ impl Synchronizer {
                         }
                     },
                     Some(result) = waiting.next() => match result {
-                        Ok((epoch,height)) => {
-                            debug!("consensus sync loopback");
-                            let _ = pending.remove(&(epoch,height));
-                            let _ = requests.remove(&(epoch,height));/////////////////?
-                            // let message = ConsensusMessage::LoopBackMsg(epoch,height);
-                            // if let Err(e) = core_channel.send(message).await {
-                            //     panic!("Failed to send message through core channel: {}", e);
-                            // }
+                        Ok(block) => {
+                            debug!("Consensus sync loopback for block epoch {}, height {}", block.epoch, block.height);
+                            let _ = pending.remove(&(block.epoch, block.height));
+                            let _ = requests.remove(&(block.epoch, block.height));
+                            
+                            // GỬI LẠI KHỐI CHO CORE ĐỂ TIẾP TỤC XỬ LÝ
+                            let message = ConsensusMessage::LoopBackMsg(block);
+                            if let Err(e) = core_channel.send(message).await {
+                                panic!("Failed to send LoopBackMsg through core channel: {}", e);
+                            }
                         },
                         Err(e) => error!("{}", e)
                     },
@@ -105,10 +108,19 @@ impl Synchronizer {
         epoch: SeqNumber,
         height: SeqNumber,
         committee: &Committee,
-    ) -> ConsensusResult<(SeqNumber, SeqNumber)> {
+    ) -> ConsensusResult<Block> { // <--- THAY ĐỔI 1: Kiểu trả về là Block
         let key = Core::rank(epoch, height, committee);
-        let _ = store.notify_read(key.to_le_bytes().into()).await?;
-        Ok((epoch, height))
+        let key_bytes: Vec<u8> = key.to_le_bytes().into();
+    
+        // Chờ cho đến khi store có dữ liệu tại key này
+        let _ = store.notify_read(key_bytes.clone()).await?;
+    
+        // Đọc và deserialize khối
+        let block_bytes = store.read(key_bytes).await?
+            .ok_or_else(|| ConsensusError::SerializedBlockNotFound(epoch, height))?;
+            
+        let block = bincode::deserialize(&block_bytes)?;
+        Ok(block) // <--- THAY ĐỔI 2: Trả về khối đã đọc được
     }
 
     pub async fn transmit(

@@ -655,39 +655,39 @@ impl Core {
         Ok(())
     }
 
-    fn log_deadlock_to_file(&self, epoch: SeqNumber, height: SeqNumber, round: SeqNumber) {
-        use std::fs::OpenOptions;
-        use std::io::Write;
+    // fn log_deadlock_to_file(&self, epoch: SeqNumber, height: SeqNumber, round: SeqNumber) {
+    //     use std::fs::OpenOptions;
+    //     use std::io::Write;
     
-        // Tên file log, bạn có thể thay đổi nếu muốn
-        let log_file_path = "aba_deadlocks.log";
+    //     // Tên file log, bạn có thể thay đổi nếu muốn
+    //     let log_file_path = "aba_deadlocks.log";
     
-        // Mở file ở chế độ ghi tiếp (append), nếu file chưa có sẽ được tạo mới
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_file_path);
+    //     // Mở file ở chế độ ghi tiếp (append), nếu file chưa có sẽ được tạo mới
+    //     let file = OpenOptions::new()
+    //         .create(true)
+    //         .append(true)
+    //         .open(log_file_path);
     
-        match file {
-            Ok(mut f) => {
-                let log_message = format!(
-                    "[{}][NODE: {}] ABA DEADLOCK on epoch {}, height {}, round {}. Deterministically choosing 1 (OPT).\n",
-                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                    self.name, // Thêm tên node để phân biệt
-                    epoch,
-                    height,
-                    round
-                );
-                // Ghi vào file, nếu lỗi thì in ra console
-                if let Err(e) = f.write_all(log_message.as_bytes()) {
-                    eprintln!("Failed to write to deadlock log file: {}", e);
-                }
-            }
-            Err(e) => {
-                eprintln!("Failed to open deadlock log file: {}", e);
-            }
-        }
-    }
+    //     match file {
+    //         Ok(mut f) => {
+    //             let log_message = format!(
+    //                 "[{}][NODE: {}] ABA DEADLOCK on epoch {}, height {}, round {}. Deterministically choosing 1 (OPT).\n",
+    //                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+    //                 self.name, // Thêm tên node để phân biệt
+    //                 epoch,
+    //                 height,
+    //                 round
+    //             );
+    //             // Ghi vào file, nếu lỗi thì in ra console
+    //             if let Err(e) = f.write_all(log_message.as_bytes()) {
+    //                 eprintln!("Failed to write to deadlock log file: {}", e);
+    //             }
+    //         }
+    //         Err(e) => {
+    //             eprintln!("Failed to open deadlock log file: {}", e);
+    //         }
+    //     }
+    // }
     
 
     async fn handle_aba_mux(&mut self, aba_mux: &ABAVal) -> ConsensusResult<()> {
@@ -891,37 +891,37 @@ impl Core {
         Ok(())
     }
 
-    async fn aba_adcance_round(
-        &mut self,
-        epoch: SeqNumber,
-        height: SeqNumber,
-        round: SeqNumber,
-        val: usize,
-    ) -> ConsensusResult<()> {
-        if !*self.aba_ends.entry((epoch, height)).or_insert(false) {
-            let aba_val = ABAVal::new(
-                self.name,
-                epoch,
-                height,
-                round,
-                val,
-                VAL_PHASE,
-                self.signature_service.clone(),
-            )
-            .await;
-            let message = ConsensusMessage::ABAValMsg(aba_val.clone());
-            Synchronizer::transmit(
-                message,
-                &self.name,
-                None,
-                &self.network_filter,
-                &self.committee,
-            )
-            .await?;
-            self.handle_aba_val(&aba_val).await?;
-        }
-        Ok(())
-    }
+    // async fn aba_adcance_round(
+    //     &mut self,
+    //     epoch: SeqNumber,
+    //     height: SeqNumber,
+    //     round: SeqNumber,
+    //     val: usize,
+    // ) -> ConsensusResult<()> {
+    //     if !*self.aba_ends.entry((epoch, height)).or_insert(false) {
+    //         let aba_val = ABAVal::new(
+    //             self.name,
+    //             epoch,
+    //             height,
+    //             round,
+    //             val,
+    //             VAL_PHASE,
+    //             self.signature_service.clone(),
+    //         )
+    //         .await;
+    //         let message = ConsensusMessage::ABAValMsg(aba_val.clone());
+    //         Synchronizer::transmit(
+    //             message,
+    //             &self.name,
+    //             None,
+    //             &self.network_filter,
+    //             &self.committee,
+    //         )
+    //         .await?;
+    //         self.handle_aba_val(&aba_val).await?;
+    //     }
+    //     Ok(())
+    // }
     /************* ABA Protocol ******************/
     pub async fn run(&mut self) {
         // let total_nums = self.committee.size() as SeqNumber;
@@ -929,7 +929,14 @@ impl Core {
         if let Err(e) = self.generate_rbc_proposal().await {
             panic!("protocol invoke failed! error {}", e);
         }
+        let mut previous_epoch = self.epoch;
+        let mut epoch_start_time = Instant::now();
+        let epoch_timeout = Duration::from_millis(self.parameters.timeout_delay * 5); // Ví dụ: 5 lần timeout cơ bản
+
         loop {
+            let timer = sleep(Duration::from_millis(5)); // Thêm một khoảng chờ nhỏ để giảm tải CPU
+            tokio::pin!(timer);
+
             let result = tokio::select! {
                 Some(message) = self.rx_core.recv() => {
                     if self.height<self.parameters.fault{
@@ -944,7 +951,7 @@ impl Core {
                         // ConsensusMessage::ABACoinShareMsg(share)=>self.handle_aba_share(&share).await,
                         ConsensusMessage::ABAOutputMsg(output)=>self.handle_aba_output(&output).await,
                         ConsensusMessage::PrePareMsg(prepare)=>self.handle_prepare(&prepare).await,
-                        ConsensusMessage::LoopBackMsg(block) =>self.handle_rbc_val(&block).await,
+                        ConsensusMessage::LoopBackMsg(block) => self.handle_loopback(&block).await, 
                         ConsensusMessage::SyncRequestMsg(epoch,height, sender) => self.handle_sync_request(epoch,height, sender).await,
                         ConsensusMessage::SyncReplyMsg(block) => self.handle_sync_reply(&block).await,
                     }
@@ -952,8 +959,24 @@ impl Core {
                 Some((digest,epoch,height)) = self.rx_commit.recv()=>{
                     self.cleanup(digest,epoch,height).await
                 },
+
+                () = &mut timer, if epoch_start_time.elapsed() > epoch_timeout => {
+                    warn!("Epoch {} has timed out. Forcing fallback to un-stick the protocol.", self.epoch);
+                    let fallback_result = self.fallback(self.epoch).await;
+                    epoch_start_time = Instant::now(); // Reset lại đồng hồ
+                    fallback_result
+                },
+    
+
                 else => break,
             };
+
+            if self.epoch > previous_epoch {
+                info!("Advanced to new epoch {}", self.epoch);
+                epoch_start_time = Instant::now(); // Reset lại đồng hồ khi có epoch mới
+                previous_epoch = self.epoch; // Cập nhật lại epoch để so sánh cho vòng lặp sau
+            }
+
             match result {
                 Ok(()) => (),
                 Err(ConsensusError::StoreError(e)) => error!("{}", e),
@@ -962,4 +985,19 @@ impl Core {
             }
         }
     }
+
+    async fn handle_loopback(&mut self, block: &Block) -> ConsensusResult<()> {
+        info!(
+            "Resuming processing for block epoch {}, height {} after sync.",
+            block.epoch, block.height
+        );
+        // Lưu khối vào store (phòng trường hợp nó chưa được lưu)
+        self.store_block(block).await;
+        
+        // Gọi lại hàm xử lý output, đây là điều đáng lẽ phải xảy ra ngay từ đầu
+        self.process_rbc_output(block.epoch, block.height).await
+    }
 }
+
+
+
