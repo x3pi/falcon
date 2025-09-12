@@ -7,7 +7,7 @@ use crate::error::{ConsensusError, ConsensusResult};
 use crate::filter::FilterInput;
 use crate::mempool::MempoolDriver;
 use crate::messages::{
-    ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, RandomnessShare, ReadyVote,
+    ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, ReadyVote,
 };
 use crate::synchronizer::Synchronizer;
 use async_recursion::async_recursion;
@@ -44,7 +44,7 @@ pub enum ConsensusMessage {
     RBCReadyMsg(ReadyVote),
     ABAValMsg(ABAVal),
     ABAMuxMsg(ABAVal),
-    ABACoinShareMsg(RandomnessShare),
+    // ABACoinShareMsg(RandomnessShare),
     ABAOutputMsg(ABAOutput),
     PrePareMsg(Prepare),
     LoopBackMsg(Block),
@@ -652,6 +652,41 @@ impl Core {
         Ok(())
     }
 
+    fn log_deadlock_to_file(&self, epoch: SeqNumber, height: SeqNumber, round: SeqNumber) {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+    
+        // Tên file log, bạn có thể thay đổi nếu muốn
+        let log_file_path = "aba_deadlocks.log";
+    
+        // Mở file ở chế độ ghi tiếp (append), nếu file chưa có sẽ được tạo mới
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_file_path);
+    
+        match file {
+            Ok(mut f) => {
+                let log_message = format!(
+                    "[{}][NODE: {}] ABA DEADLOCK on epoch {}, height {}, round {}. Deterministically choosing 1 (OPT).\n",
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                    self.name, // Thêm tên node để phân biệt
+                    epoch,
+                    height,
+                    round
+                );
+                // Ghi vào file, nếu lỗi thì in ra console
+                if let Err(e) = f.write_all(log_message.as_bytes()) {
+                    eprintln!("Failed to write to deadlock log file: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to open deadlock log file: {}", e);
+            }
+        }
+    }
+    
+
     async fn handle_aba_mux(&mut self, aba_mux: &ABAVal) -> ConsensusResult<()> {
         debug!(
             "processing aba mux epoch {} height {}",
@@ -689,24 +724,34 @@ impl Core {
                 }
 
                 if mux_flags[PES as usize] || mux_flags[OPT as usize] {
-                    let share = RandomnessShare::new(
+                    // Mạng đã có đủ bằng chứng cho ít nhất một giá trị.
+                    // Bỏ qua common coin và áp dụng quy tắc xác định.
+                    
+                    let mut final_value = OPT as usize; // Mặc định là 1 (OPT)
+
+                    if mux_flags[OPT as usize] && mux_flags[PES as usize] {
+                        // TRƯỜNG HỢP BẾ TẮC: Cả hai giá trị đều có thể.
+                        // Ghi log và chọn giá trị mặc định đã định.
+                        warn!(
+                            "ABA DEADLOCK on epoch {}, height {}, round {}. Deterministically choosing 1 (OPT).",
+                            aba_mux.epoch, aba_mux.height, aba_mux.round
+                        );
+                        self.log_deadlock_to_file(aba_mux.epoch, aba_mux.height, aba_mux.round);
+
+                    } else if !mux_flags[OPT as usize] && mux_flags[PES as usize] {
+                        // Nếu chỉ có bằng chứng cho 0, thì phải chọn 0.
+                        final_value = PES as usize;
+                    }
+                    // (Trường hợp còn lại là chỉ có bằng chứng cho 1, giữ nguyên giá trị mặc định)
+
+                    // Chuyển sang vòng ABA tiếp theo với giá trị đã quyết định.
+                    self.aba_adcance_round(
                         aba_mux.epoch,
                         aba_mux.height,
-                        aba_mux.round,
-                        self.name,
-                        self.signature_service.clone(),
-                    )
-                    .await;
-                    let message = ConsensusMessage::ABACoinShareMsg(share.clone());
-                    Synchronizer::transmit(
-                        message,
-                        &self.name,
-                        None,
-                        &self.network_filter,
-                        &self.committee,
+                        aba_mux.round + 1,
+                        final_value,
                     )
                     .await?;
-                    self.handle_aba_share(&share).await?;
                 }
             }
         }
@@ -714,32 +759,32 @@ impl Core {
         Ok(())
     }
 
-    async fn handle_aba_share(&mut self, share: &RandomnessShare) -> ConsensusResult<()> {
-        debug!(
-            "processing coin share epoch {} height {} round {}",
-            share.epoch, share.height, share.round
-        );
-        share.verify(&self.committee, &self.pk_set)?;
-        if let Some(coin) = self
-            .aggregator
-            .add_aba_share_coin(share.clone(), &self.pk_set)?
-        {
-            let mux_flags = self
-                .aba_mux_flags
-                .entry((share.epoch, share.height, share.round))
-                .or_insert([false, false]);
-            let mut val = coin;
-            if mux_flags[coin] && !mux_flags[1 - coin] {
-                self.process_aba_output(share.epoch, share.height, share.round, coin)
-                    .await?;
-            } else if !mux_flags[coin] && mux_flags[1 - coin] {
-                val = 1 - coin;
-            }
-            self.aba_adcance_round(share.epoch, share.height, share.round + 1, val)
-                .await?;
-        }
-        Ok(())
-    }
+    // async fn handle_aba_share(&mut self, share: &RandomnessShare) -> ConsensusResult<()> {
+    //     debug!(
+    //         "processing coin share epoch {} height {} round {}",
+    //         share.epoch, share.height, share.round
+    //     );
+    //     share.verify(&self.committee, &self.pk_set)?;
+    //     if let Some(coin) = self
+    //         .aggregator
+    //         .add_aba_share_coin(share.clone(), &self.pk_set)?
+    //     {
+    //         let mux_flags = self
+    //             .aba_mux_flags
+    //             .entry((share.epoch, share.height, share.round))
+    //             .or_insert([false, false]);
+    //         let mut val = coin;
+    //         if mux_flags[coin] && !mux_flags[1 - coin] {
+    //             self.process_aba_output(share.epoch, share.height, share.round, coin)
+    //                 .await?;
+    //         } else if !mux_flags[coin] && mux_flags[1 - coin] {
+    //             val = 1 - coin;
+    //         }
+    //         self.aba_adcance_round(share.epoch, share.height, share.round + 1, val)
+    //             .await?;
+    //     }
+    //     Ok(())
+    // }
 
     async fn handle_aba_output(&mut self, output: &ABAOutput) -> ConsensusResult<()> {
         debug!(
@@ -881,7 +926,7 @@ impl Core {
                         ConsensusMessage::RBCReadyMsg(rvote)=> self.handle_rbc_ready(&rvote).await,
                         ConsensusMessage::ABAValMsg(val)=>self.handle_aba_val(&val).await,
                         ConsensusMessage::ABAMuxMsg(mux)=> self.handle_aba_mux(&mux).await,
-                        ConsensusMessage::ABACoinShareMsg(share)=>self.handle_aba_share(&share).await,
+                        // ConsensusMessage::ABACoinShareMsg(share)=>self.handle_aba_share(&share).await,
                         ConsensusMessage::ABAOutputMsg(output)=>self.handle_aba_output(&output).await,
                         ConsensusMessage::PrePareMsg(prepare)=>self.handle_prepare(&prepare).await,
                         ConsensusMessage::LoopBackMsg(block) =>self.handle_rbc_val(&block).await,
