@@ -5,8 +5,9 @@ use crate::{config::Committee, SeqNumber};
 use crypto::Digest;
 use log::{debug, info};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::error::TrySendError;
 
-pub const MAX_BLOCK_BUFFER: usize = 20000;
+pub const MAX_BLOCK_BUFFER: usize = 10000;
 
 async fn try_to_commit(
     mut cur_ind: usize,
@@ -29,14 +30,10 @@ async fn try_to_commit(
         }
     }
     let (mut e, mut h): (SeqNumber, SeqNumber) = (0, 0);
-    let mut committed_block_flag = false;
-
-    //gửi các khối có thể commit đến tầng consensus
+    //向共识层发送可以提交的块
     for block in data {
         if !block.payload.is_empty() {
-            // --- BƯỚC 5: Khối được commit ---
-            info!("[BƯỚC 5] Committed Block: Epoch: {}, Height: {}, Author: {}, Payload Digests: {}",
-                  block.epoch, block.height, block.author, block.payload.len());
+            info!("Committed {}", block);
 
             #[cfg(feature = "benchmark")]
             for x in &block.payload {
@@ -50,11 +47,9 @@ async fn try_to_commit(
             digests.append(&mut block.payload.clone());
         }
         debug!("Committed {}", block);
-        (e, h) = (block.epoch, block.height);
-        committed_block_flag = true;
+        (e, h) = (block.epoch, block.height)
     }
-
-    if committed_block_flag {
+    if !digests.is_empty() {
         if let Err(e) = tx_commit.send((digests, e, h)).await {
             panic!("Failed to filter block to commiter core: {}", e);
         }
@@ -88,18 +83,18 @@ impl Commitor {
                     Some(block) = rx_block.recv()=>{
                         let rank = block.rank(&committee);
                         if let Some(_) = buffer[rank]{
-                            //速率过快 错误处理 增大Buffer
+                            // Tốc độ quá nhanh, cần xử lý lỗi hoặc tăng buffer
                         }
                         buffer[rank] = Some(block);
                     }
                     Some(ind) = rx_filter.recv()=>{
                         if filter[ind]{
-                            //速率过快 错误处理 增大Buffer
+                            // Tốc độ quá nhanh, cần xử lý lỗi hoặc tăng buffer
                         }
                         filter[ind]=true;
                     }
                 }
-                //try to commit
+                // Thử commit
                 cur_ind = try_to_commit(cur_ind, &mut buffer, &mut filter, tx_commit.clone()).await;
             }
         });
@@ -110,15 +105,29 @@ impl Commitor {
         }
     }
 
+    // --- SỬA HÀM NÀY ---
     pub async fn buffer_block(&self, block: Block) {
-        if let Err(e) = self.tx_block.send(block).await {
-            panic!("Failed to send block to commiter core: {}", e);
+        match self.tx_block.try_send(block) {
+            Ok(()) => (),
+            Err(TrySendError::Full(_)) => {
+                panic!("[PANIC] Kênh Commitor (tx_block) đã đầy! Core có thể đã bị bế tắc.");
+            }
+            Err(TrySendError::Closed(_)) => {
+                 panic!("[PANIC] Kênh Commitor (tx_block) đã bị đóng!");
+            }
         }
     }
 
+    // --- VÀ SỬA HÀM NÀY ---
     pub async fn filter_block(&self, ind: usize) {
-        if let Err(e) = self.tx_filter.send(ind).await {
-            panic!("Failed to filter block to commiter core: {}", e);
+        match self.tx_filter.try_send(ind) {
+            Ok(()) => (),
+            Err(TrySendError::Full(_)) => {
+                panic!("[PANIC] Kênh Commitor (tx_filter) đã đầy! Core có thể đã bị bế tắc.");
+            }
+            Err(TrySendError::Closed(_)) => {
+                 panic!("[PANIC] Kênh Commitor (tx_filter) đã bị đóng!");
+            }
         }
     }
 }
