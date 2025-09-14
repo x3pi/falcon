@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
+	"time"
 )
 
 // CommittedTransactions khớp với struct trong Rust
@@ -16,6 +18,9 @@ type CommittedTransactions struct {
 	Height       uint64   `json:"height"`
 	Transactions [][]byte `json:"transactions"`
 }
+
+// Biến đếm giao dịch toàn cục, sử dụng atomic để đảm bảo an toàn luồng
+var txCounter uint64
 
 func handleTxConnection(conn net.Conn) {
 	defer conn.Close()
@@ -45,14 +50,16 @@ func handleTxConnection(conn net.Conn) {
 			continue
 		}
 
-		// ---- BẮT ĐẦU THAY ĐỔI ----
-		// Kiểm tra xem block có rỗng không và in ra thông báo tương ứng
-		if len(data.Transactions) == 0 {
+		numTxs := len(data.Transactions)
+		// Tăng biến đếm một cách an toàn
+		atomic.AddUint64(&txCounter, uint64(numTxs))
+
+		if numTxs == 0 {
 			fmt.Printf("⚪ Received Empty Block (Epoch: %d, Height: %d)\n",
 				data.Epoch, data.Height)
 		} else {
 			fmt.Printf("🚚 Received %d transactions from Block (Epoch: %d, Height: %d)\n",
-				len(data.Transactions), data.Epoch, data.Height)
+				numTxs, data.Epoch, data.Height)
 
 			// (Tùy chọn) In ra một vài giao dịch để kiểm tra
 			for i, tx := range data.Transactions {
@@ -61,7 +68,32 @@ func handleTxConnection(conn net.Conn) {
 				}
 			}
 		}
+	}
+}
+
+// Goroutine để tính toán và in TPS
+func tpsCalculator() {
+	// ---- THAY ĐỔI Ở ĐÂY ----
+	const intervalSeconds = 20
+	ticker := time.NewTicker(intervalSeconds * time.Second)
+	// ---- KẾT THÚC THAY ĐỔI ----
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Đọc số lượng giao dịch hiện tại một cách an toàn
+		currentTxCount := atomic.LoadUint64(&txCounter)
+		// Reset biến đếm về 0 cho chu kỳ tiếp theo
+		atomic.StoreUint64(&txCounter, 0)
+
+		// ---- THAY ĐỔI Ở ĐÂY ----
+		// Tính TPS (giao dịch / số giây trong chu kỳ)
+		tps := float64(currentTxCount) / float64(intervalSeconds)
 		// ---- KẾT THÚC THAY ĐỔI ----
+
+		fmt.Printf("\n========================================\n")
+		fmt.Printf("📈 TPS over the last %d seconds: %.2f tx/s\n", intervalSeconds, tps)
+		fmt.Printf("(Total transactions in last %d seconds: %d)\n", intervalSeconds, currentTxCount)
+		fmt.Printf("========================================\n\n")
 	}
 }
 
@@ -72,6 +104,9 @@ func main() {
 	}
 	defer listener.Close()
 	fmt.Println("Go server is listening for committed transactions on port 9002")
+
+	// Chạy goroutine tính TPS trong nền
+	go tpsCalculator()
 
 	for {
 		conn, err := listener.Accept()
