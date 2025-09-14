@@ -49,6 +49,7 @@ PARAMETERS_FILE="$BENCHMARK_DIR/.parameters.json"
 # --- Stage 0: Build ---
 cargo clean
 cargo build --release --features benchmark
+
 # --- Giai đoạn 1: Dọn dẹp và Kiểm tra ---
 echo "--- Stage 1: Cleanup and Preparation ---"
 echo "INFO: Stopping tmux server..."
@@ -82,19 +83,11 @@ echo ""
 echo "--- Stage 2: Configuration File Generation ---"
 echo "INFO: Generating key files..."
 key_files=()
-threshold_key_files=()
-# Xây dựng lệnh `threshold_keys` với tất cả các tệp đầu ra được chỉ định
-tss_cmd="$NODE_BINARY threshold_keys"
 for i in $(seq 0 $((NODES-1))); do
     key_file="$BENCHMARK_DIR/.node-$i.json"
-    threshold_key_file="$BENCHMARK_DIR/.node-tss-$i.json"
     $NODE_BINARY keys --filename "$key_file"
-    tss_cmd+=" --filename $threshold_key_file"
     key_files+=("$key_file")
-    threshold_key_files+=("$threshold_key_file")
 done
-# Chạy lệnh `threshold_keys` một lần duy nhất để đảm bảo tương thích
-$tss_cmd
 
 echo "INFO: Creating parameters file ($PARAMETERS_FILE)..."
 jq -n \
@@ -115,10 +108,10 @@ echo "INFO: Creating committee file ($COMMITTEE_FILE)..."
 json_template='{ "consensus": { "authorities": {}, "epoch": 1 }, "mempool": { "authorities": {}, "epoch": 1 } }'
 committee_json="$json_template"
 for i in $(seq 0 $((NODES-1))); do
-    key_file="${key_files[$i]}"; threshold_key_file="${threshold_key_files[$i]}"
-    name=$(jq -r '.name' "$key_file"); id=$(jq '.id' "$threshold_key_file")
+    key_file="${key_files[$i]}";
+    name=$(jq -r '.name' "$key_file");
     consensus_addr="127.0.0.1:$((BASE_PORT + i))"; front_addr="127.0.0.1:$((BASE_PORT + NODES + i))"; mempool_addr="127.0.0.1:$((BASE_PORT + 2*NODES + i))"
-    committee_json=$(echo "$committee_json" | jq --arg name "$name" --arg addr "$consensus_addr" --argjson id "$id" '.consensus.authorities[$name] = { "address": $addr, "id": $id, "name": $name, "stake": 1 }')
+    committee_json=$(echo "$committee_json" | jq --arg name "$name" --arg addr "$consensus_addr" --argjson id "$i" '.consensus.authorities[$name] = { "address": $addr, "id": $id, "name": $name, "stake": 1 }')
     committee_json=$(echo "$committee_json" | jq --arg name "$name" --arg front "$front_addr" --arg mempool "$mempool_addr" '.mempool.authorities[$name] = { "name": $name, "front_address": $front, "mempool_address": $mempool }')
 done
 echo "$committee_json" | jq . > "$COMMITTEE_FILE"
@@ -138,9 +131,9 @@ done
 
 echo "INFO: Launching $NODES nodes..."
 for i in $(seq 0 $((NODES-1))); do
-    key_file="${key_files[$i]}"; threshold_key_file="${threshold_key_files[$i]}"
+    key_file="${key_files[$i]}";
     db_path="$BENCHMARK_DIR/db_$i"; log_file="$LOG_DIR/node-$i.log"
-    cmd="$NODE_BINARY run --keys $key_file --threshold_keys $threshold_key_file --committee $COMMITTEE_FILE --store $db_path --parameters $PARAMETERS_FILE"
+    cmd="$NODE_BINARY run --keys $key_file --committee $COMMITTEE_FILE --store $db_path --parameters $PARAMETERS_FILE"
     
     # ==============================================================================
     # SỬA LỖI TẠI ĐÂY: Cưỡng bức ghi log và thêm cơ chế chẩn đoán lỗi

@@ -70,7 +70,7 @@ impl Runner {
         loop {
             tokio::select! {
                 Some(transaction) = self.client_channel.recv() => {
-                    info!("[PayloadRunner] Đã nhận giao dịch từ client.");
+                    // info!("[PayloadRunner] Đã nhận giao dịch từ client.");
                     if let Some(payload) = self.add(transaction).await {
                         info!("[PayloadRunner] Payload đã đầy, gửi đến core.");
                         let message = MempoolMessage::OwnPayload(payload);
