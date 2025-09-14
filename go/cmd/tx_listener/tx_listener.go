@@ -10,11 +10,11 @@ import (
 	"net"
 )
 
-// CommittedTransactions khớp với struct mới trong Rust
+// CommittedTransactions khớp với struct trong Rust
 type CommittedTransactions struct {
 	Epoch        uint64   `json:"epoch"`
 	Height       uint64   `json:"height"`
-	Transactions [][]byte `json:"transactions"` // Nhận mảng của các mảng byte
+	Transactions [][]byte `json:"transactions"`
 }
 
 func handleTxConnection(conn net.Conn) {
@@ -45,15 +45,23 @@ func handleTxConnection(conn net.Conn) {
 			continue
 		}
 
-		fmt.Printf("🚚 Received %d transactions from Block (Epoch: %d, Height: %d)\n",
-			len(data.Transactions), data.Epoch, data.Height)
+		// ---- BẮT ĐẦU THAY ĐỔI ----
+		// Kiểm tra xem block có rỗng không và in ra thông báo tương ứng
+		if len(data.Transactions) == 0 {
+			fmt.Printf("⚪ Received Empty Block (Epoch: %d, Height: %d)\n",
+				data.Epoch, data.Height)
+		} else {
+			fmt.Printf("🚚 Received %d transactions from Block (Epoch: %d, Height: %d)\n",
+				len(data.Transactions), data.Epoch, data.Height)
 
-		// (Tùy chọn) In ra một vài giao dịch để kiểm tra
-		for i, tx := range data.Transactions {
-			if i < 2 { // Chỉ in 2 giao dịch đầu tiên để tránh spam console
-				fmt.Printf("  - TX %d: %s\n", i+1, base64.StdEncoding.EncodeToString(tx))
+			// (Tùy chọn) In ra một vài giao dịch để kiểm tra
+			for i, tx := range data.Transactions {
+				if i < 2 { // Chỉ in 2 giao dịch đầu tiên để tránh spam console
+					fmt.Printf("  - TX %d: %s\n", i+1, base64.StdEncoding.EncodeToString(tx))
+				}
 			}
 		}
+		// ---- KẾT THÚC THAY ĐỔI ----
 	}
 }
 
