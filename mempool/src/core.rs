@@ -17,8 +17,8 @@ use std::collections::HashSet;
 #[cfg(feature = "benchmark")]
 use std::convert::TryInto as _;
 use store::Store;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 #[cfg(test)]
 #[path = "tests/core_tests.rs"]
@@ -196,27 +196,28 @@ impl Core {
         }
 
         // 2. Chỉ gửi đi nếu có giao dịch
-        if !all_transactions.is_empty() {
-            let committed_data = CommittedTransactions {
-                epoch,
-                height,
-                transactions: all_transactions,
-            };
-            
-            // 3. Gửi dữ liệu vào channel một cách không-chặn (non-blocking)
-            match self.go_tx_sender.try_send(committed_data) {
-                Ok(()) => {
-                    info!("Queued committed transactions from block (E:{}, H:{}) to be sent to Go.", epoch, height);
-                }
-                Err(TrySendError::Full(_)) => {
-                    warn!("Channel to Go-Sender is full. Dropping committed transactions for block (E:{}, H:{}). The Go service might be slow or down.", epoch, height);
-                }
-                Err(TrySendError::Closed(_)) => {
-                    warn!("Channel to Go-Sender is closed. The Go-Sender task might have panicked.");
-                }
+        let committed_data = CommittedTransactions {
+            epoch,
+            height,
+            transactions: all_transactions,
+        };
+
+        // 3. Gửi dữ liệu vào channel một cách không-chặn (non-blocking)
+        match self.go_tx_sender.try_send(committed_data) {
+            Ok(()) => {
+                info!(
+                    "Queued committed transactions from block (E:{}, H:{}) to be sent to Go.",
+                    epoch, height
+                );
+            }
+            Err(TrySendError::Full(_)) => {
+                warn!("Channel to Go-Sender is full. Dropping committed transactions for block (E:{}, H:{}). The Go service might be slow or down.", epoch, height);
+            }
+            Err(TrySendError::Closed(_)) => {
+                warn!("Channel to Go-Sender is closed. The Go-Sender task might have panicked.");
             }
         }
-        
+
         // 4. Thực hiện logic dọn dẹp ban đầu (nhanh chóng và không bị chặn)
         self.synchronizer.cleanup(epoch, height).await;
         for x in &digests {
