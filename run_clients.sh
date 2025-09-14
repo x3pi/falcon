@@ -8,7 +8,7 @@ set -e
 
 # Cấu hình Benchmark (giống hệt trong run_benchmark.sh)
 NODES=4
-RATE=50000
+RATE=10000
 TX_SIZE=512
 SYNC_TIMEOUT=2000
 
