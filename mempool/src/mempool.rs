@@ -2,7 +2,6 @@
 
 use crate::config::{Committee, Parameters};
 // THÊM DÒNG NÀY
-use crate::core::CommittedTransactions;
 use crate::core::Core;
 use crate::error::MempoolResult;
 use crate::front::Front;

@@ -62,7 +62,7 @@ pub struct Core {
     _tx_core: Sender<ConsensusMessage>,
     rx_core: Receiver<ConsensusMessage>,
     network_filter: Sender<FilterInput>,
-    commit_channel: Sender<Block>,
+    _commit_channel: Sender<Block>,
     rx_commit_signal: Receiver<(Vec<Digest>, SeqNumber, SeqNumber)>,
     fallback: SeqNumber,
     epoch: SeqNumber,
@@ -98,7 +98,7 @@ impl Core {
         tx_core: Sender<ConsensusMessage>,
         rx_core: Receiver<ConsensusMessage>,
         network_filter: Sender<FilterInput>,
-        commit_channel: Sender<Block>,
+        _commit_channel: Sender<Block>,
         // ---- THÊM THAM SỐ MỚI ----
         tx_commit_notification: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
     ) -> Self {
@@ -117,7 +117,7 @@ impl Core {
             mempool_driver,
             synchronizer,
             network_filter,
-            commit_channel,
+            _commit_channel,
             rx_commit_signal,
             _tx_core: tx_core,
             rx_core,
