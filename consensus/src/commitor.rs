@@ -13,10 +13,9 @@ async fn try_to_commit(
     mut cur_ind: usize,
     buffer: &mut Vec<Option<Block>>,
     filter: &mut Vec<bool>,
-    tx_commit: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
+    tx_commit: Sender<Block>, // SỬA ĐỔI: Gửi toàn bộ Block
 ) -> usize {
     let mut data = Vec::new();
-    let mut digests = Vec::new();
     loop {
         if let Some(block) = buffer[cur_ind].clone() {
             data.push(block);
@@ -29,8 +28,8 @@ async fn try_to_commit(
             break;
         }
     }
-    let (mut e, mut h): (SeqNumber, SeqNumber) = (0, 0);
-    //向共识层发送可以提交的块
+    
+    // Gửi các khối có thể cam kết đến Core
     for block in data {
         if !block.payload.is_empty() {
             info!("Committed {}", block);
@@ -44,14 +43,12 @@ async fn try_to_commit(
                     block.epoch,
                 );
             }
-            digests.append(&mut block.payload.clone());
         }
         debug!("Committed {}", block);
-        (e, h) = (block.epoch, block.height)
-    }
-    if !digests.is_empty() {
-        if let Err(e) = tx_commit.send((digests, e, h)).await {
-            panic!("Failed to filter block to commiter core: {}", e);
+
+        // SỬA ĐỔI: Gửi toàn bộ đối tượng block qua channel
+        if let Err(e) = tx_commit.send(block).await {
+            panic!("Failed to send committed block to core: {}", e);
         }
     }
     cur_ind
@@ -64,7 +61,7 @@ pub struct Commitor {
 
 impl Commitor {
     pub fn new(
-        tx_commit: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
+        tx_commit: Sender<Block>, // SỬA ĐỔI: Kênh nhận Block
         committee: Committee,
     ) -> Self {
         let (tx_block, mut rx_block): (_, Receiver<Block>) = channel(10000);

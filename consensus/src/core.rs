@@ -63,8 +63,8 @@ pub struct Core {
     _tx_core: Sender<ConsensusMessage>,
     rx_core: Receiver<ConsensusMessage>,
     network_filter: Sender<FilterInput>,
-    _commit_channel: Sender<Block>,
-    rx_commit: Receiver<(Vec<Digest>, SeqNumber, SeqNumber)>,
+    commit_channel: Sender<Block>,      // <<-- THAY ĐỔI 1: Đổi tên `_commit_channel`
+    rx_commit: Receiver<Block>,  
     fallback: SeqNumber,
     epoch: SeqNumber,
     height: SeqNumber,
@@ -116,7 +116,7 @@ impl Core {
             synchronizer,
             network_filter,
             rx_commit,
-            _commit_channel: commit_channel,
+            commit_channel: commit_channel,
             _tx_core: tx_core,
             rx_core,
             aggregator,
@@ -811,8 +811,18 @@ impl Core {
                         ConsensusMessage::SyncReplyMsg(block) => self.handle_sync_reply(&block).await,
                     }
                 },
-                Some((digest,epoch,height)) = self.rx_commit.recv()=>{
-                    self.cleanup(digest,epoch,height).await
+                Some(block) = self.rx_commit.recv() => {
+                    let digest = block.payload.clone();
+                    let epoch = block.epoch;
+                    let height = block.height;
+
+                    // Gửi khối đã cam kết đến Node để thực thi.
+                    if let Err(e) = self.commit_channel.send(block).await {
+                        warn!("Failed to send committed block to node: {}", e);
+                    }
+                    
+                    // Thực hiện dọn dẹp sau khi đã gửi.
+                    self.cleanup(digest, epoch, height).await
                 },
 
                 () = &mut timer, if epoch_start_time.elapsed() > epoch_timeout => {
