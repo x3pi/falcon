@@ -76,15 +76,19 @@ impl Commitor {
                     Some(block) = rx_block.recv()=>{
                         let rank = block.rank(&committee);
                         if buffer[rank].is_some(){
-                             warn!("Commitor buffer for rank {} is already full!", rank);
+                             warn!("Commitor buffer for rank {} is already full! Discarding new block.", rank);
+                        } else {
+                            buffer[rank] = Some(block);
                         }
-                        buffer[rank] = Some(block);
                     }
                     Some(ind) = rx_filter.recv()=>{
                         if filter[ind]{
                            warn!("Commitor filter for index {} is already set!", ind);
                         }
                         filter[ind]=true;
+                    }
+                    else => {
+                        break;
                     }
                 }
                 cur_ind = try_to_commit(cur_ind, &mut buffer, &mut filter, tx_commit.clone()).await;
