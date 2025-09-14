@@ -1,14 +1,14 @@
 use crate::config::Export as _;
 use crate::config::{Committee, Parameters, Secret};
-use consensus::{Block, Consensus, ConsensusError, Protocol};
-use crypto::{SecretShare, SignatureService};
+use consensus::{Consensus, ConsensusError, Protocol};
+use crypto::SignatureService;
 use log::{info, warn};
 use mempool::{Mempool, MempoolError};
 use store::{Store, StoreError};
 use thiserror::Error;
-use threshold_crypto::serde_impl::SerdeSecret;
-use threshold_crypto::SecretKeySet;
 use tokio::sync::mpsc::{channel, Receiver};
+use consensus::Block;
+
 
 #[derive(Error, Debug)]
 pub enum NodeError {
@@ -36,7 +36,6 @@ impl Node {
     pub async fn new(
         committee_file: &str,
         key_file: &str,
-        tss_file: &str,
         store_path: &str,
         parameters: Option<&str>,
     ) -> Result<Self, NodeError> {
@@ -58,7 +57,6 @@ impl Node {
         assert_eq!(name.0, public_key_from_secret.0, "Public key in keyfile does not match the one derived from the secret key!");
         
         let secret_key = secret.secret; // The secret key will be moved later.
-        let tss_keys = SecretShare::read(tss_file)?;
 
         // Load default parameters if none are specified.
         let parameters = match parameters {
@@ -71,7 +69,7 @@ impl Node {
 
         // Run the signature service.
         let signature_service =
-            SignatureService::new(secret_key, Some(tss_keys.secret.into_inner()));
+            SignatureService::new(secret_key);
 
         let protocol = match parameters.protocol {
             0 => Protocol::FlexHBBFT,
@@ -115,23 +113,6 @@ impl Node {
 
     pub fn print_key_file(filename: &str) -> Result<(), NodeError> {
         Secret::new().write(filename)
-    }
-
-    // Print the threshold signature keys to the corresponding files
-    pub fn print_threshold_key_file(filenames: Vec<&str>) -> Result<(), NodeError> {
-        let size = filenames.len();
-        let threshold = (size - 1) / 3; // The threshold for TSS is f
-        let mut rng = rand::thread_rng();
-        let sk_set = SecretKeySet::random(threshold, &mut rng);
-        let pk_set = sk_set.public_keys();
-
-        for id in 0..size {
-            let sk_share = sk_set.secret_key_share(id);
-            let pk_share = pk_set.public_key_share(id);
-            SecretShare::new(id, pk_share, SerdeSecret(sk_share.clone()), pk_set.clone())
-                .write(filenames[id])?;
-        }
-        Ok(())
     }
 
     pub async fn analyze_block(&mut self) {

@@ -1,6 +1,6 @@
 use crate::node::NodeError;
 use consensus::{Committee as ConsensusCommittee, Parameters as ConsensusParameters};
-use crypto::{generate_keypair, PublicKey, SecretKey, SecretShare};
+use crypto::{generate_keypair, PublicKey, SecretKey};
 use mempool::{Committee as MempoolCommittee, Parameters as MempoolParameters};
 
 use serde::de::DeserializeOwned;
@@ -69,8 +69,6 @@ impl Default for Secret {
         Self { name, secret }
     }
 }
-
-impl Export for SecretShare {}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Committee {

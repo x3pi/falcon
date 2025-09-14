@@ -45,7 +45,6 @@ pub enum ConsensusMessage {
     RBCReadyMsg(ReadyVote),
     ABAValMsg(ABAVal),
     ABAMuxMsg(ABAVal),
-    // ABACoinShareMsg(RandomnessShare),
     ABAOutputMsg(ABAOutput),
     PrePareMsg(Prepare),
     LoopBackMsg(Block),
@@ -137,11 +136,6 @@ impl Core {
         }
     }
 
-    // async fn delay_rbc_time(epoch: SeqNumber, time_out: SeqNumber) -> SeqNumber {
-    //     sleep(Duration::from_millis(time_out)).await;
-    //     epoch
-    // }
-
     pub fn rank(epoch: SeqNumber, height: SeqNumber, committee: &Committee) -> usize {
         let r = ((epoch as usize) * committee.size() + (height as usize)) % MAX_BLOCK_BUFFER;
         r
@@ -167,8 +161,6 @@ impl Core {
         self.buffers.retain(|(e, h, ..), _| e * size + h > rank);
         self.rbc_proofs.retain(|(e, h, ..), _| e * size + h > rank);
         self.rbc_ready.retain(|(e, h)| e * size + h > rank);
-        // self.rbc_outputs.retain(|(e, h, ..), _| e * size + h > rank);
-        // self.prepare_flags.retain(|(e, h), _| e * size + h > rank);
         self.aba_values.retain(|(e, h, ..), _| e * size + h > rank);
         self.aba_mux_values
             .retain(|(e, h, ..), _| e * size + h > rank);
@@ -177,19 +169,16 @@ impl Core {
         self.aba_mux_flags
             .retain(|(e, h, ..), _| e * size + h > rank);
         self.aba_outputs.retain(|(e, h, ..), _| e * size + h > rank);
-        // self.aba_ends.retain(|(e, h, ..), _| e * size + h > rank);
 
         if epoch > self.parameters.pruning_threshold {
             let prune_epoch = epoch - self.parameters.pruning_threshold;
             
-            // Xóa các khối trong epoch cũ
             for h in 0..self.committee.size() as SeqNumber {
                 let rank_to_prune = Self::rank(prune_epoch, h, &self.committee);
                 let key_to_prune: Vec<u8> = rank_to_prune.to_le_bytes().into();
                 self.store.delete(key_to_prune).await;
             }
 
-            // Dọn dẹp các epoch output cũ trong bộ nhớ
             self.rbc_epoch_outputs.retain(|e, _| *e >= prune_epoch);
             debug!("Pruned data from epoch {}", prune_epoch);
         }
@@ -234,28 +223,23 @@ impl Core {
     /************* RBC Protocol ******************/
     #[async_recursion]
     async fn generate_rbc_proposal(&mut self) -> ConsensusResult<()> {
-        // Make a new block.
         if self.height < self.parameters.fault {
             return Ok(());
         }
         debug!("start rbc epoch {}", self.epoch);
 
-        // --- BƯỚC 3: Consensus yêu cầu payload từ Mempool ---
         info!("[BƯỚC 3] Consensus core: Đang yêu cầu payload từ mempool driver cho epoch {}.", self.epoch);
-        // --- KẾT THÚC BƯỚC 3 ---
 
         let payload = self
             .mempool_driver
             .get(self.parameters.max_payload_size)
             .await;
 
-        // --- BƯỚC 4: Consensus nhận được payload ---
         if payload.is_empty() {
             info!("[BƯỚC 4] Consensus core: Mempool trả về payload trống. Bỏ qua đề xuất khối lần này.");
         } else {
             info!("[BƯỚC 4] Consensus core: Mempool trả về payload với {} digest.", payload.len());
         }
-        // --- KẾT THÚC BƯỚC 4 ---
 
         let block = Block::new(
             self.name,
@@ -270,7 +254,6 @@ impl Core {
 
             #[cfg(feature = "benchmark")]
             for x in &block.payload {
-                // NOTE: This log entry is used to compute performance.
                 info!(
                     "Created B{}({}) epoch {}",
                     block.height,
@@ -281,7 +264,6 @@ impl Core {
         }
         debug!("Created {:?}", block);
 
-        // Process our new block and broadcast it.
         let message = ConsensusMessage::RBCValMsg(block.clone());
         Synchronizer::transmit(
             message,
@@ -293,7 +275,6 @@ impl Core {
         .await?;
         self.handle_rbc_val(&block).await?;
 
-        // Wait for the minimum block delay.
         sleep(Duration::from_millis(self.parameters.min_block_delay)).await;
 
         Ok(())
@@ -436,9 +417,7 @@ impl Core {
                 self.commitor.buffer_block(block.clone()).await;
 
                 if outputs.len() as Stake == self.committee.quorum_threshold() {
-                    //wait 2f+1?
                     self.rbc_advance(epoch + 1).await?;
-                    // check is timeout?
                     self.fallback(epoch).await?;
                 }
             }
@@ -449,15 +428,11 @@ impl Core {
     async fn fallback(&mut self, cur_epoch: SeqNumber) -> ConsensusResult<()> {
         if cur_epoch >= self.fallback {
             let fall_epoch = cur_epoch - self.fallback;
-            // let mut total = 0;
             for height in 0..(self.committee.size() as SeqNumber) {
                 if !self.prepare_flags.contains(&(fall_epoch, height)) {
                     self.invoke_prepare(fall_epoch, height, PES).await?;
-                    // total += 1;
                 }
             }
-            // let f = self.committee.random_coin_threshold() - 1;
-            // self.fallback = ((self.parameters.fallback - 1) * )
         }
         Ok(())
     }
@@ -465,8 +440,7 @@ impl Core {
     async fn rbc_advance(&mut self, epoch: SeqNumber) -> ConsensusResult<()> {
         if epoch > self.epoch {
             self.epoch = epoch;
-            //清除之前的缓存
-            self.generate_rbc_proposal().await?; //继续下一轮发送
+            self.generate_rbc_proposal().await?; 
         }
         Ok(())
     }
@@ -480,7 +454,6 @@ impl Core {
         val: u8,
     ) -> ConsensusResult<()> {
         if self.prepare_flags.insert((epoch, height)) {
-            //启动prepare投票
             let prepare = Prepare::new(
                 self.name,
                 epoch,
@@ -515,7 +488,6 @@ impl Core {
             debug!("prepare=> val {}", val);
             if flag {
                 if prepare.phase == PRE_ONE {
-                    //可以直接提交
                     self.process_rbc_output(prepare.epoch, prepare.height)
                         .await?;
                 } else if prepare.phase == PRE_TWO {
@@ -547,7 +519,6 @@ impl Core {
                 } else if prepare.phase == PRE_TWO {
                     self.aba_timeouts.insert((prepare.epoch, prepare.height), Instant::now());
 
-                    //发送ABA
                     let aba_val = ABAVal::new(
                         self.name,
                         prepare.epoch,
@@ -595,7 +566,6 @@ impl Core {
             if nums == self.committee.random_coin_threshold()
                 && !values[aba_val.val].contains(&self.name)
             {
-                //f+1
                 let other = ABAVal::new(
                     self.name,
                     aba_val.epoch,
@@ -654,40 +624,6 @@ impl Core {
         }
         Ok(())
     }
-
-    // fn log_deadlock_to_file(&self, epoch: SeqNumber, height: SeqNumber, round: SeqNumber) {
-    //     use std::fs::OpenOptions;
-    //     use std::io::Write;
-    
-    //     // Tên file log, bạn có thể thay đổi nếu muốn
-    //     let log_file_path = "aba_deadlocks.log";
-    
-    //     // Mở file ở chế độ ghi tiếp (append), nếu file chưa có sẽ được tạo mới
-    //     let file = OpenOptions::new()
-    //         .create(true)
-    //         .append(true)
-    //         .open(log_file_path);
-    
-    //     match file {
-    //         Ok(mut f) => {
-    //             let log_message = format!(
-    //                 "[{}][NODE: {}] ABA DEADLOCK on epoch {}, height {}, round {}. Deterministically choosing 1 (OPT).\n",
-    //                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-    //                 self.name, // Thêm tên node để phân biệt
-    //                 epoch,
-    //                 height,
-    //                 round
-    //             );
-    //             // Ghi vào file, nếu lỗi thì in ra console
-    //             if let Err(e) = f.write_all(log_message.as_bytes()) {
-    //                 eprintln!("Failed to write to deadlock log file: {}", e);
-    //             }
-    //         }
-    //         Err(e) => {
-    //             eprintln!("Failed to open deadlock log file: {}", e);
-    //         }
-    //     }
-    // }
     
 
     async fn handle_aba_mux(&mut self, aba_mux: &ABAVal) -> ConsensusResult<()> {
@@ -695,15 +631,12 @@ impl Core {
             "processing aba mux epoch {} height {}",
             aba_mux.epoch, aba_mux.height
         );
-        // 1. Xác thực tin nhắn
         aba_mux.verify()?;
     
-        // Nếu phiên ABA này đã kết thúc, bỏ qua tin nhắn để tránh xử lý thừa
         if *self.aba_ends.entry((aba_mux.epoch, aba_mux.height)).or_insert(false) {
             return Ok(());
         }
     
-        // 2. Xử lý timeout để phá vỡ bế tắc (Deadlock Prevention)
         if let Some(start_time) = self.aba_timeouts.get(&(aba_mux.epoch, aba_mux.height)) {
             let timeout_duration = Duration::from_millis(self.parameters.timeout_delay * 2);
             if start_time.elapsed() > timeout_duration {
@@ -712,18 +645,15 @@ impl Core {
                     aba_mux.epoch, aba_mux.height, aba_mux.round
                 );
     
-                // Khi timeout, buộc kết thúc ABA với giá trị mặc định là 1 (OPT)
                 return self.process_aba_output(aba_mux.epoch, aba_mux.height, aba_mux.round, OPT as usize).await;
             }
         }
     
-        // 3. Tổng hợp các phiếu bầu (mux votes)
         let mux_votes = self
             .aba_mux_values
             .entry((aba_mux.epoch, aba_mux.height, aba_mux.round))
             .or_insert_with(|| [HashSet::new(), HashSet::new()]);
     
-        // Bỏ qua phiếu đã được xử lý
         if !mux_votes[aba_mux.val].insert(aba_mux.author) {
             return Ok(());
         }
@@ -738,22 +668,15 @@ impl Core {
     
         let mut decision: Option<usize> = None;
     
-        // 4. Logic Quyết Định Kết Thúc (Termination Logic) - Trái tim của việc sửa lỗi
-        
-        // Trường hợp 1: Đạt được quorum cho một giá trị duy nhất -> Ra quyết định ngay lập tức
         if num_opt_votes >= self.committee.quorum_threshold() {
             decision = Some(OPT as usize);
         } else if num_pes_votes >= self.committee.quorum_threshold() {
             decision = Some(PES as usize);
         }
-        // Trường hợp 2: Tổng số phiếu đạt quorum nhưng bị chia rẽ.
         else if num_opt_votes + num_pes_votes >= self.committee.quorum_threshold() {
-            // Nếu trước đó đã có bằng chứng cho cả hai giá trị ('val' phase)
             if val_flags[OPT as usize] && val_flags[PES as usize] {
-                 // Ưu tiên OPT để đảm bảo tính sống (liveness)
                  decision = Some(OPT as usize);
             } 
-            // Nếu trước đó chỉ có bằng chứng cho một giá trị, quyết định theo giá trị đó
             else if val_flags[OPT as usize] {
                 decision = Some(OPT as usize);
             } else if val_flags[PES as usize] {
@@ -761,45 +684,12 @@ impl Core {
             }
         }
     
-        // 5. Hành Động Dứt Khoát
         if let Some(decided_value) = decision {
-            // Đã có quyết định! Gọi process_aba_output để kết thúc phiên ABA này.
-            // Đây là thay đổi quan trọng nhất để ngăn vòng lặp vô hạn.
             return self.process_aba_output(aba_mux.epoch, aba_mux.height, aba_mux.round, decided_value).await;
         }
     
-        // Nếu vẫn chưa đủ điều kiện, tiếp tục chờ thêm tin nhắn.
         Ok(())
     }
-
-    
-
-    // async fn handle_aba_share(&mut self, share: &RandomnessShare) -> ConsensusResult<()> {
-    //     debug!(
-    //         "processing coin share epoch {} height {} round {}",
-    //         share.epoch, share.height, share.round
-    //     );
-    //     share.verify(&self.committee, &self.pk_set)?;
-    //     if let Some(coin) = self
-    //         .aggregator
-    //         .add_aba_share_coin(share.clone(), &self.pk_set)?
-    //     {
-    //         let mux_flags = self
-    //             .aba_mux_flags
-    //             .entry((share.epoch, share.height, share.round))
-    //             .or_insert([false, false]);
-    //         let mut val = coin;
-    //         if mux_flags[coin] && !mux_flags[1 - coin] {
-    //             self.process_aba_output(share.epoch, share.height, share.round, coin)
-    //                 .await?;
-    //         } else if !mux_flags[coin] && mux_flags[1 - coin] {
-    //             val = 1 - coin;
-    //         }
-    //         self.aba_adcance_round(share.epoch, share.height, share.round + 1, val)
-    //             .await?;
-    //     }
-    //     Ok(())
-    // }
 
     async fn handle_aba_output(&mut self, output: &ABAOutput) -> ConsensusResult<()> {
         debug!(
@@ -890,51 +780,17 @@ impl Core {
 
         Ok(())
     }
-
-    // async fn aba_adcance_round(
-    //     &mut self,
-    //     epoch: SeqNumber,
-    //     height: SeqNumber,
-    //     round: SeqNumber,
-    //     val: usize,
-    // ) -> ConsensusResult<()> {
-    //     if !*self.aba_ends.entry((epoch, height)).or_insert(false) {
-    //         let aba_val = ABAVal::new(
-    //             self.name,
-    //             epoch,
-    //             height,
-    //             round,
-    //             val,
-    //             VAL_PHASE,
-    //             self.signature_service.clone(),
-    //         )
-    //         .await;
-    //         let message = ConsensusMessage::ABAValMsg(aba_val.clone());
-    //         Synchronizer::transmit(
-    //             message,
-    //             &self.name,
-    //             None,
-    //             &self.network_filter,
-    //             &self.committee,
-    //         )
-    //         .await?;
-    //         self.handle_aba_val(&aba_val).await?;
-    //     }
-    //     Ok(())
-    // }
     /************* ABA Protocol ******************/
     pub async fn run(&mut self) {
-        // let total_nums = self.committee.size() as SeqNumber;
-        // let mut pending_rbc = FuturesUnordered::new();
         if let Err(e) = self.generate_rbc_proposal().await {
             panic!("protocol invoke failed! error {}", e);
         }
         let mut previous_epoch = self.epoch;
         let mut epoch_start_time = Instant::now();
-        let epoch_timeout = Duration::from_millis(self.parameters.timeout_delay * 5); // Ví dụ: 5 lần timeout cơ bản
+        let epoch_timeout = Duration::from_millis(self.parameters.timeout_delay * 5); 
 
         loop {
-            let timer = sleep(Duration::from_millis(5)); // Thêm một khoảng chờ nhỏ để giảm tải CPU
+            let timer = sleep(Duration::from_millis(5)); 
             tokio::pin!(timer);
 
             let result = tokio::select! {
@@ -948,7 +804,6 @@ impl Core {
                         ConsensusMessage::RBCReadyMsg(rvote)=> self.handle_rbc_ready(&rvote).await,
                         ConsensusMessage::ABAValMsg(val)=>self.handle_aba_val(&val).await,
                         ConsensusMessage::ABAMuxMsg(mux)=> self.handle_aba_mux(&mux).await,
-                        // ConsensusMessage::ABACoinShareMsg(share)=>self.handle_aba_share(&share).await,
                         ConsensusMessage::ABAOutputMsg(output)=>self.handle_aba_output(&output).await,
                         ConsensusMessage::PrePareMsg(prepare)=>self.handle_prepare(&prepare).await,
                         ConsensusMessage::LoopBackMsg(block) => self.handle_loopback(&block).await, 
@@ -963,7 +818,7 @@ impl Core {
                 () = &mut timer, if epoch_start_time.elapsed() > epoch_timeout => {
                     warn!("Epoch {} has timed out. Forcing fallback to un-stick the protocol.", self.epoch);
                     let fallback_result = self.fallback(self.epoch).await;
-                    epoch_start_time = Instant::now(); // Reset lại đồng hồ
+                    epoch_start_time = Instant::now(); 
                     fallback_result
                 },
     
@@ -973,8 +828,8 @@ impl Core {
 
             if self.epoch > previous_epoch {
                 info!("Advanced to new epoch {}", self.epoch);
-                epoch_start_time = Instant::now(); // Reset lại đồng hồ khi có epoch mới
-                previous_epoch = self.epoch; // Cập nhật lại epoch để so sánh cho vòng lặp sau
+                epoch_start_time = Instant::now(); 
+                previous_epoch = self.epoch; 
             }
 
             match result {
@@ -991,13 +846,8 @@ impl Core {
             "Resuming processing for block epoch {}, height {} after sync.",
             block.epoch, block.height
         );
-        // Lưu khối vào store (phòng trường hợp nó chưa được lưu)
         self.store_block(block).await;
         
-        // Gọi lại hàm xử lý output, đây là điều đáng lẽ phải xảy ra ngay từ đầu
         self.process_rbc_output(block.epoch, block.height).await
     }
 }
-
-
-
