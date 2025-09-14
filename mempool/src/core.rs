@@ -182,50 +182,49 @@ impl Core {
         self.synchronizer.verify_payload(*block).await
     }
 
-    // ---- BẮT ĐẦU THAY ĐỔI: VIẾT LẠI HOÀN TOÀN HÀM CLEANUP ----
     async fn cleanup(&mut self, digests: Vec<Digest>, epoch: SeqNumber, height: SeqNumber) {
         let mut all_transactions = Vec::new();
 
-        // 1. Lặp qua các digest và đọc payload đầy đủ từ store
-        for digest in &digests {
-            if let Ok(Some(payload_bytes)) = self.store.read(digest.to_vec()).await {
-                if let Ok(payload) = bincode::deserialize::<Payload>(&payload_bytes) {
-                    all_transactions.extend(payload.transactions);
+        // 1. Luôn thu thập giao dịch từ các payload (nếu có)
+        // Vòng lặp này sẽ tạo ra một `all_transactions` rỗng nếu không có giao dịch nào
+        if !digests.is_empty() {
+            for digest in &digests {
+                if let Ok(Some(payload_bytes)) = self.store.read(digest.to_vec()).await {
+                    if let Ok(payload) = bincode::deserialize::<Payload>(&payload_bytes) {
+                        all_transactions.extend(payload.transactions);
+                    }
                 }
             }
         }
 
-        // 2. Chỉ gửi đi nếu có giao dịch
+        // 2. Tạo đối tượng CommittedTransactions bất kể có giao dịch hay không
         let committed_data = CommittedTransactions {
             epoch,
             height,
             transactions: all_transactions,
         };
-
-        // 3. Gửi dữ liệu vào channel một cách không-chặn (non-blocking)
+        
+        // 3. Luôn gửi thông tin về block (kể cả rỗng) vào channel
         match self.go_tx_sender.try_send(committed_data) {
             Ok(()) => {
-                info!(
-                    "Queued committed transactions from block (E:{}, H:{}) to be sent to Go.",
-                    epoch, height
-                );
+                // Thay đổi log để phản ánh đúng hành vi
+                info!("Queued Block Info (E:{}, H:{}) to be sent to Go.", epoch, height);
             }
             Err(TrySendError::Full(_)) => {
-                warn!("Channel to Go-Sender is full. Dropping committed transactions for block (E:{}, H:{}). The Go service might be slow or down.", epoch, height);
+                warn!("Channel to Go-Sender is full. Dropping info for block (E:{}, H:{}). The Go service might be slow or down.", epoch, height);
             }
             Err(TrySendError::Closed(_)) => {
                 warn!("Channel to Go-Sender is closed. The Go-Sender task might have panicked.");
             }
         }
-
-        // 4. Thực hiện logic dọn dẹp ban đầu (nhanh chóng và không bị chặn)
+        
+        // 4. Logic dọn dẹp ban đầu luôn được thực hiện
         self.synchronizer.cleanup(epoch, height).await;
         for x in &digests {
             self.queue.remove(x);
             self.store.delete(x.to_vec()).await;
         }
     }
-    // ---- KẾT THÚC THAY ĐỔI ----
 
     pub async fn run(&mut self) {
         let log = |result: Result<&(), &MempoolError>| match result {
