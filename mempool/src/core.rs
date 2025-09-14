@@ -10,14 +10,13 @@ use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
 #[cfg(feature = "benchmark")]
 use log::info;
-use log::{error, info, warn};
+use log::{error, warn};
 use network::NetMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 #[cfg(feature = "benchmark")]
 use std::convert::TryInto as _;
 use store::Store;
-use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 #[cfg(test)]
@@ -50,8 +49,7 @@ pub struct Core {
     core_channel: Receiver<MempoolMessage>,
     consensus_channel: Receiver<ConsensusMempoolMessage>,
     network_channel: Sender<NetMessage>,
-    queue: HashSet<Digest>,
-    go_tx_sender: Sender<CommittedTransactions>,
+    queue: HashSet<Digest>
 }
 
 impl Core {
@@ -66,9 +64,6 @@ impl Core {
         core_channel: Receiver<MempoolMessage>,
         consensus_channel: Receiver<ConsensusMempoolMessage>,
         network_channel: Sender<NetMessage>,
-        // ---- BẮT ĐẦU THAY ĐỔI ----
-        go_tx_sender: Sender<CommittedTransactions>,
-        // ---- KẾT THÚC THAY ĐỔI ----
     ) -> Self {
         let queue = HashSet::with_capacity(parameters.queue_capacity);
         Self {
@@ -82,7 +77,6 @@ impl Core {
             network_channel,
             queue,
             payload_maker,
-            go_tx_sender,
         }
     }
 
@@ -194,27 +188,6 @@ impl Core {
                         all_transactions.extend(payload.transactions);
                     }
                 }
-            }
-        }
-
-        // 2. Tạo đối tượng CommittedTransactions bất kể có giao dịch hay không
-        let committed_data = CommittedTransactions {
-            epoch,
-            height,
-            transactions: all_transactions,
-        };
-        
-        // 3. Luôn gửi thông tin về block (kể cả rỗng) vào channel
-        match self.go_tx_sender.try_send(committed_data) {
-            Ok(()) => {
-                // Thay đổi log để phản ánh đúng hành vi
-                info!("Queued Block Info (E:{}, H:{}) to be sent to Go.", epoch, height);
-            }
-            Err(TrySendError::Full(_)) => {
-                warn!("Channel to Go-Sender is full. Dropping info for block (E:{}, H:{}). The Go service might be slow or down.", epoch, height);
-            }
-            Err(TrySendError::Closed(_)) => {
-                warn!("Channel to Go-Sender is closed. The Go-Sender task might have panicked.");
             }
         }
         

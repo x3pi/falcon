@@ -7,7 +7,6 @@ use crate::core::Core;
 use crate::error::MempoolResult;
 use crate::front::Front;
 // THÊM DÒNG NÀY
-use crate::go_sender;
 use crate::payload::PayloadMaker;
 use crate::synchronizer::Synchronizer;
 use consensus::{ConsensusMempoolMessage, ConsensusMessage};
@@ -50,15 +49,6 @@ impl Mempool {
         let (tx_core, rx_core) = channel(10000);
         let (tx_client, rx_client) = channel(10000);
         
-        // ---- BẮT ĐẦU THAY ĐỔI ----
-        // 1. Tạo channel mới để giao tiếp với Go Sender task.
-        let (tx_go_sender, rx_go_sender) = channel::<CommittedTransactions>(10000);
-
-        // 2. Spawn Go Sender task.
-        tokio::spawn(async move {
-            go_sender::run(rx_go_sender).await;
-        });
-        // ---- KẾT THÚC THAY ĐỔI ----
 
         // Run the front end that receives client transactions.
         let address = committee.front_address(&name).map(|mut x| {
@@ -122,7 +112,6 @@ impl Mempool {
             /* network_channel */ tx_network,
             // ---- BẮT ĐẦU THAY ĐỔI ----
             // 3. Truyền tx_go_sender vào Core.
-            tx_go_sender,
             // ---- KẾT THÚC THAY ĐỔI ----
         );
 

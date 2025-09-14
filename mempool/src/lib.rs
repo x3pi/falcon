@@ -7,7 +7,6 @@ mod mempool;
 mod messages;
 mod payload;
 mod synchronizer;
-mod go_sender;
 
 #[cfg(test)]
 #[path = "tests/common.rs"]

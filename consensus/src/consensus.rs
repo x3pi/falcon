@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::config::{Committee, Parameters, Protocol};
 use crate::core::{ConsensusMessage, Core};
 use crate::error::ConsensusResult;
@@ -7,15 +5,15 @@ use crate::filter::Filter;
 use crate::mempool::{ConsensusMempoolMessage, MempoolDriver};
 use crate::messages::Block;
 use crate::synchronizer::Synchronizer;
-use crypto::{PublicKey, SignatureService};
+use crate::core::SeqNumber;
+use crypto::{Digest, PublicKey, SignatureService};
+use futures::future::join_all;
 use log::info;
 use network::{NetReceiver, NetSender};
 use store::Store;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-// use tokio::time::{Duration, sleep};
-use futures::future::join_all;
 use tokio::net::TcpStream;
-use tokio::time::sleep;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::time::{sleep, Duration};
 
 #[cfg(test)]
 #[path = "tests/consensus_tests.rs"]
@@ -35,6 +33,7 @@ impl Consensus {
         rx_core: Receiver<ConsensusMessage>,
         tx_consensus_mempool: Sender<ConsensusMempoolMessage>,
         tx_commit: Sender<Block>,
+        tx_commit_notification: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
         protocol: Protocol,
     ) -> ConsensusResult<()> {
         info!(
@@ -115,15 +114,15 @@ impl Consensus {
                     mempool_driver,
                     synchronizer,
                     tx_core,
-                    /* core_channel */ rx_core,
-                    /* network_filter */ tx_filter,
-                    /* commit_channel */ tx_commit,
+                    rx_core,
+                    tx_filter,
+                    tx_commit,
+                    tx_commit_notification,
                 );
                 tokio::spawn(async move {
                     core.run().await;
                 });
             }
-
             _ => {
                 return Ok(());
             }

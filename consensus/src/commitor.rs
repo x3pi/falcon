@@ -1,9 +1,11 @@
+// consensus/src/commitor.rs
+
 use std::usize;
 
 use crate::Block;
 use crate::{config::Committee, SeqNumber};
 use crypto::Digest;
-use log::{debug, info};
+use log::{debug, info, warn};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
 
@@ -15,12 +17,12 @@ async fn try_to_commit(
     filter: &mut Vec<bool>,
     tx_commit: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
 ) -> usize {
-    let mut data = Vec::new();
-    let mut digests = Vec::new();
+    let mut data_to_process = Vec::new();
+
+    // 1. Thu thập tất cả các khối có thể commit
     loop {
-        if let Some(block) = buffer[cur_ind].clone() {
-            data.push(block);
-            buffer[cur_ind] = None;
+        if let Some(block) = buffer[cur_ind].take() { 
+            data_to_process.push(block);
             cur_ind = (cur_ind + 1) % MAX_BLOCK_BUFFER
         } else if filter[cur_ind] {
             filter[cur_ind] = false;
@@ -29,33 +31,27 @@ async fn try_to_commit(
             break;
         }
     }
-    let (mut e, mut h): (SeqNumber, SeqNumber) = (0, 0);
-    //向共识层发送可以提交的块
-    for block in data {
+
+    // 2. Xử lý từng khối đã thu thập
+    for block in data_to_process {
+        let mut digests = Vec::new();
+        let (epoch, height) = (block.epoch, block.height);
+
         if !block.payload.is_empty() {
             info!("Committed {}", block);
-
-            #[cfg(feature = "benchmark")]
-            for x in &block.payload {
-                info!(
-                    "Committed B{}({}) epoch {}",
-                    block.height,
-                    base64::encode(x),
-                    block.epoch,
-                );
-            }
-            digests.append(&mut block.payload.clone());
+            digests.extend(block.payload.clone());
+        } else {
+            debug!("Committed Empty Block {}", block);
         }
-        debug!("Committed {}", block);
-        (e, h) = (block.epoch, block.height)
-    }
-    if !digests.is_empty() {
-        if let Err(e) = tx_commit.send((digests, e, h)).await {
+
+        // 3. LUÔN LUÔN GỬI TÍN HIỆU COMMIT CHO MỌI KHỐI
+        if let Err(e) = tx_commit.send((digests, epoch, height)).await {
             panic!("Failed to filter block to commiter core: {}", e);
         }
     }
     cur_ind
 }
+
 
 pub struct Commitor {
     tx_block: Sender<Block>,
@@ -72,29 +68,25 @@ impl Commitor {
 
         tokio::spawn(async move {
             let mut cur_ind = 0;
-            let mut buffer: Vec<Option<Block>> = Vec::with_capacity(MAX_BLOCK_BUFFER);
-            let mut filter: Vec<bool> = Vec::with_capacity(MAX_BLOCK_BUFFER);
-            for _ in 0..MAX_BLOCK_BUFFER {
-                buffer.push(None);
-                filter.push(false);
-            }
+            let mut buffer: Vec<Option<Block>> = vec![None; MAX_BLOCK_BUFFER];
+            let mut filter: Vec<bool> = vec![false; MAX_BLOCK_BUFFER];
+            
             loop {
                 tokio::select! {
                     Some(block) = rx_block.recv()=>{
                         let rank = block.rank(&committee);
-                        if let Some(_) = buffer[rank]{
-                            // Tốc độ quá nhanh, cần xử lý lỗi hoặc tăng buffer
+                        if buffer[rank].is_some(){
+                             warn!("Commitor buffer for rank {} is already full!", rank);
                         }
                         buffer[rank] = Some(block);
                     }
                     Some(ind) = rx_filter.recv()=>{
                         if filter[ind]{
-                            // Tốc độ quá nhanh, cần xử lý lỗi hoặc tăng buffer
+                           warn!("Commitor filter for index {} is already set!", ind);
                         }
                         filter[ind]=true;
                     }
                 }
-                // Thử commit
                 cur_ind = try_to_commit(cur_ind, &mut buffer, &mut filter, tx_commit.clone()).await;
             }
         });
@@ -105,7 +97,6 @@ impl Commitor {
         }
     }
 
-    // --- SỬA HÀM NÀY ---
     pub async fn buffer_block(&self, block: Block) {
         match self.tx_block.try_send(block) {
             Ok(()) => (),
@@ -118,7 +109,6 @@ impl Commitor {
         }
     }
 
-    // --- VÀ SỬA HÀM NÀY ---
     pub async fn filter_block(&self, ind: usize) {
         match self.tx_filter.try_send(ind) {
             Ok(()) => (),

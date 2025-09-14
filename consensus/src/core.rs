@@ -15,16 +15,15 @@ use crypto::{Digest, PublicKey, SignatureService};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use store::Store;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::time::{sleep, Duration};
-use tokio::time::Instant;
+use tokio::sync::mpsc::{channel, error::TrySendError, Receiver, Sender};
+use tokio::time::{sleep, Duration, Instant};
 
 #[cfg(test)]
 #[path = "tests/core_tests.rs"]
 pub mod core_tests;
 
-pub type SeqNumber = u64; // For both round and view
-pub type HeightNumber = u8; // height={1,2} in fallback chain, height=0 for sync block
+pub type SeqNumber = u64; 
+pub type HeightNumber = u8;
 
 pub const RBC_ECHO: u8 = 0;
 pub const RBC_READY: u8 = 1;
@@ -63,15 +62,17 @@ pub struct Core {
     _tx_core: Sender<ConsensusMessage>,
     rx_core: Receiver<ConsensusMessage>,
     network_filter: Sender<FilterInput>,
-    _commit_channel: Sender<Block>,
-    rx_commit: Receiver<(Vec<Digest>, SeqNumber, SeqNumber)>,
+    commit_channel: Sender<Block>,
+    rx_commit_signal: Receiver<(Vec<Digest>, SeqNumber, SeqNumber)>,
     fallback: SeqNumber,
     epoch: SeqNumber,
     height: SeqNumber,
     aggregator: Aggregator,
     commitor: Commitor,
+    // ---- KÊNH GỬI THÔNG BÁO SANG GO ----
+    tx_commit_notification: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
     buffers: HashMap<(SeqNumber, SeqNumber), bool>,
-    rbc_proofs: HashMap<(SeqNumber, SeqNumber, u8), RBCProof>, //需要update
+    rbc_proofs: HashMap<(SeqNumber, SeqNumber, u8), RBCProof>,
     rbc_ready: HashSet<(SeqNumber, SeqNumber)>,
     rbc_epoch_outputs: HashMap<SeqNumber, HashSet<SeqNumber>>,
     prepare_flags: HashSet<(SeqNumber, SeqNumber)>,
@@ -82,7 +83,6 @@ pub struct Core {
     aba_outputs: HashMap<(SeqNumber, SeqNumber, SeqNumber), HashSet<PublicKey>>,
     aba_ends: HashMap<(SeqNumber, SeqNumber), bool>,
     aba_timeouts: HashMap<(SeqNumber, SeqNumber), Instant>,
-
 }
 
 impl Core {
@@ -99,10 +99,12 @@ impl Core {
         rx_core: Receiver<ConsensusMessage>,
         network_filter: Sender<FilterInput>,
         commit_channel: Sender<Block>,
+        // ---- THÊM THAM SỐ MỚI ----
+        tx_commit_notification: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
     ) -> Self {
-        let (tx_commit, rx_commit) = channel(10000);
+        let (tx_commit_signal, rx_commit_signal) = channel(10000);
         let aggregator = Aggregator::new(committee.clone());
-        let commitor = Commitor::new(tx_commit.clone(), committee.clone());
+        let commitor = Commitor::new(tx_commit_signal.clone(), committee.clone());
         Self {
             fallback: parameters.fallback,
             epoch: 0,
@@ -115,12 +117,13 @@ impl Core {
             mempool_driver,
             synchronizer,
             network_filter,
-            rx_commit,
-            _commit_channel: commit_channel,
+            commit_channel,
+            rx_commit_signal,
             _tx_core: tx_core,
             rx_core,
             aggregator,
             commitor,
+            tx_commit_notification,
             buffers: HashMap::new(),
             rbc_proofs: HashMap::new(),
             rbc_ready: HashSet::new(),
@@ -132,7 +135,7 @@ impl Core {
             aba_mux_flags: HashMap::new(),
             aba_outputs: HashMap::new(),
             aba_ends: HashMap::new(),
-            aba_timeouts: HashMap::new(), // <-- THÊM DÒNG NÀY
+            aba_timeouts: HashMap::new(),
         }
     }
 
@@ -811,8 +814,17 @@ impl Core {
                         ConsensusMessage::SyncReplyMsg(block) => self.handle_sync_reply(&block).await,
                     }
                 },
-                Some((digest,epoch,height)) = self.rx_commit.recv()=>{
-                    self.cleanup(digest,epoch,height).await
+                Some((digests, epoch, height)) = self.rx_commit_signal.recv() => {
+                    // GỬI TÍN HIỆU CHO NOTIFIER (KHÔNG CHẶN)
+                    // Luồng đồng thuận không bị ảnh hưởng nếu Go chậm.
+                    let notification = (digests.clone(), epoch, height);
+                    if let Err(TrySendError::Full(_)) = self.tx_commit_notification.try_send(notification) {
+                        warn!("[ConsensusCore] Go-Notifier channel is full. Dropping notification for block (E:{}, H:{}).", epoch, height);
+                    }
+
+                    // GỌI CLEANUP MỘT CÁCH ĐỘC LẬP
+                    // Việc dọn dẹp mempool vẫn diễn ra như bình thường và không liên quan đến việc gửi sang Go.
+                    self.cleanup(digests, epoch, height).await
                 },
 
                 () = &mut timer, if epoch_start_time.elapsed() > epoch_timeout => {
