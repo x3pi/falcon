@@ -2,7 +2,7 @@ use crate::config::Export as _;
 use crate::config::{Committee, Parameters, Secret};
 use consensus::{Consensus, ConsensusError, Protocol};
 use crypto::SignatureService;
-use log::{info, warn};
+use log::{error, info, warn};
 use mempool::{Mempool, MempoolError};
 use store::{Store, StoreError};
 use thiserror::Error;
@@ -123,15 +123,12 @@ impl Node {
 
     pub async fn analyze_block(&mut self) {
         while let Some(block) = self.commit.recv().await {
-            // Log thông báo cam kết khối như cũ
             info!(
                 "Block Committed - Epoch: {}, Height: {}",
                 block.epoch, block.height
             );
 
-            // --- BẮT ĐẦU LOGIC GỬI SANG GO ---
-
-            // 1. Kiểm tra và thiết lập kết nối đến Go server nếu chưa có.
+            // 1. Kiểm tra và thiết lập kết nối
             if self.go_connection.is_none() {
                 match TcpStream::connect("127.0.0.1:9001").await {
                     Ok(stream) => {
@@ -139,40 +136,41 @@ impl Node {
                         self.go_connection = Some(stream);
                     }
                     Err(e) => {
-                        warn!("Failed to connect to Go server: {}. Retrying on next block.", e);
-                        continue; // Bỏ qua lần gửi này và thử lại ở khối tiếp theo
+                        // --- THAY ĐỔI Ở ĐÂY ---
+                        // Ghi log lỗi nghiêm trọng và dừng chương trình ngay lập tức.
+                        error!(
+                            "FATAL: Could not connect to Go server: {}. The application will now exit.",
+                            e
+                        );
+                        panic!("Go server connection failed."); // Dừng chương trình
                     }
                 }
             }
             
-            // 2. Gửi khối đi qua kết nối TCP.
+            // 2. Gửi khối đi qua kết nối TCP
             if let Some(stream) = &mut self.go_connection {
-                // Tuần tự hóa (serialize) đối tượng Block thành chuỗi JSON.
                 let block_json = match serde_json::to_vec(&block) {
                     Ok(json) => json,
                     Err(e) => {
                         error!("Failed to serialize block to JSON: {}", e);
-                        continue; // Bỏ qua nếu không serialize được
+                        continue;
                     }
                 };
 
-                // Gửi theo định dạng: [độ dài 4-byte][dữ liệu JSON]
                 let len = block_json.len() as u32;
+                let len_bytes = len.to_be_bytes();
 
-                // Gửi độ dài trước
-                if let Err(e) = stream.write_u32(len).await {
-                    warn!("Failed to send data to Go server (connection lost): {}. Resetting connection.", e);
-                    self.go_connection = None; // Reset kết nối để thử lại lần sau
+                if let Err(e) = stream.write_all(&len_bytes).await {
+                    warn!("Failed to send length to Go server (connection lost): {}. Resetting connection.", e);
+                    self.go_connection = None;
                     continue;
                 }
                 
-                // Sau đó gửi dữ liệu
                 if let Err(e) = stream.write_all(&block_json).await {
-                    warn!("Failed to send data to Go server (connection lost): {}. Resetting connection.", e);
-                    self.go_connection = None; // Reset kết nối
+                    warn!("Failed to send JSON data to Go server (connection lost): {}. Resetting connection.", e);
+                    self.go_connection = None;
                 }
             }
-            // --- KẾT THÚC LOGIC GỬI SANG GO ---
         }
     }
 }
