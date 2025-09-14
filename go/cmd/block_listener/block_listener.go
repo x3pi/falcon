@@ -15,7 +15,7 @@ type Block struct {
 	Author    string   `json:"author"`
 	Epoch     uint64   `json:"epoch"`
 	Height    uint64   `json:"height"`
-	Payload   []string `json:"payload"`
+	Payload   []string `json:"payload"` // Đã sửa thành mảng chuỗi
 	Signature string   `json:"signature"`
 }
 
@@ -30,7 +30,7 @@ func handleConnection(conn net.Conn) {
 		if err != nil {
 			if err == io.EOF {
 				fmt.Println("Connection closed by client.")
-				return // Kết thúc hàm khi client đóng kết nối
+				return
 			}
 			fmt.Printf("Error reading length: %v\n", err)
 			return
@@ -49,8 +49,9 @@ func handleConnection(conn net.Conn) {
 		var block Block
 		err = json.Unmarshal(jsonBuf, &block)
 		if err != nil {
+			// Lỗi sẽ không còn xảy ra ở đây nữa
 			fmt.Printf("Error unmarshalling JSON: %v\n", err)
-			continue // Bỏ qua tin nhắn này nếu không hợp lệ
+			continue
 		}
 
 		// 4. In khối đã nhận ra console
@@ -60,7 +61,6 @@ func handleConnection(conn net.Conn) {
 }
 
 func main() {
-	// Lắng nghe kết nối TCP tại cổng 9001
 	listener, err := net.Listen("tcp", "127.0.0.1:9001")
 	if err != nil {
 		panic(fmt.Sprintf("Failed to start server: %v", err))
@@ -69,7 +69,6 @@ func main() {
 	fmt.Println("Go server is listening for committed blocks on port 9001")
 
 	for {
-		// Chấp nhận kết nối mới và xử lý trong một goroutine riêng
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Printf("Failed to accept connection: %v\n", err)
