@@ -7,4 +7,4 @@ publish = false
 
 [dependencies]
 rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
-tokio = { version = "1.3.0", features = ["sync", "macros", "rt"] }
+tokio = { version = "1.47.1", features = ["sync", "macros", "rt"] }

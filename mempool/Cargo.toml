@@ -6,7 +6,7 @@ edition = "2018"
 publish = false
 
 [dependencies]
-tokio = { version = "1.3.0", features = ["rt", "net", "time", "macros", "sync", "io-util"] }
+tokio = { version = "1.47.1", features = ["rt", "net", "time", "macros", "sync", "io-util"] }
 tokio-util = { version = "0.6.4", features= ["codec"] }
 ed25519-dalek = "1.0.1"
 thiserror = "1.0.21"

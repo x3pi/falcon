@@ -1,3 +1,5 @@
+// tx_listener.go
+
 package main
 
 import (
@@ -7,9 +9,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os" // <-- THÊM VÀO
 	"sync/atomic"
 	"time"
 )
+
+// Khai báo đường dẫn socket ở một nơi để dễ thay đổi
+const socketPath = "/tmp/consensus.sock" // <-- THÊM VÀO
 
 // CommittedTransactions khớp với struct trong Rust
 type CommittedTransactions struct {
@@ -18,12 +24,11 @@ type CommittedTransactions struct {
 	Transactions [][]byte `json:"transactions"`
 }
 
-// Biến đếm giao dịch cho mỗi chu kỳ TPS, sử dụng atomic để đảm bảo an toàn luồng
+// (Các biến toàn cục giữ nguyên)
 var txCounter uint64
+var totalTxCounter uint64
 
-// Biến đếm tổng số giao dịch từ khi khởi động, không bao giờ reset
-var totalTxCounter uint64 // <-- THAY ĐỔI
-
+// (Hàm handleTxConnection không thay đổi)
 func handleTxConnection(conn net.Conn) {
 	defer conn.Close()
 	fmt.Printf("Accepted new mempool connection from: %s\n", conn.RemoteAddr().String())
@@ -53,10 +58,8 @@ func handleTxConnection(conn net.Conn) {
 		}
 
 		numTxs := len(data.Transactions)
-		// Tăng biến đếm cho chu kỳ hiện tại
 		atomic.AddUint64(&txCounter, uint64(numTxs))
-		// Tăng biến đếm tổng số giao dịch
-		atomic.AddUint64(&totalTxCounter, uint64(numTxs)) // <-- THAY ĐỔI
+		atomic.AddUint64(&totalTxCounter, uint64(numTxs))
 
 		if numTxs == 0 {
 			fmt.Printf("⚪ Received Empty Block (Epoch: %d, Height: %d)\n",
@@ -65,9 +68,8 @@ func handleTxConnection(conn net.Conn) {
 			fmt.Printf("🚚 Received %d transactions from Block (Epoch: %d, Height: %d)\n",
 				numTxs, data.Epoch, data.Height)
 
-			// (Tùy chọn) In ra một vài giao dịch để kiểm tra
 			for i, tx := range data.Transactions {
-				if i < 2 { // Chỉ in 2 giao dịch đầu tiên để tránh spam console
+				if i < 2 {
 					fmt.Printf("  - TX %d: %s\n", i+1, base64.StdEncoding.EncodeToString(tx))
 				}
 			}
@@ -75,41 +77,46 @@ func handleTxConnection(conn net.Conn) {
 	}
 }
 
-// Goroutine để tính toán và in TPS cũng như tổng số giao dịch
+// (Hàm tpsCalculator không thay đổi)
 func tpsCalculator() {
 	const intervalSeconds = 20
 	ticker := time.NewTicker(intervalSeconds * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Đọc số lượng giao dịch trong chu kỳ hiện tại
 		currentTxCount := atomic.LoadUint64(&txCounter)
-		// Reset biến đếm của chu kỳ về 0 cho chu kỳ tiếp theo
 		atomic.StoreUint64(&txCounter, 0)
-
-		// Đọc tổng số giao dịch từ khi khởi động
-		totalTxs := atomic.LoadUint64(&totalTxCounter) // <-- THAY ĐỔI
-
-		// Tính TPS (giao dịch / số giây trong chu kỳ)
+		totalTxs := atomic.LoadUint64(&totalTxCounter)
 		tps := float64(currentTxCount) / float64(intervalSeconds)
 
 		fmt.Printf("\n========================================\n")
 		fmt.Printf("📈 TPS over the last %d seconds: %.2f tx/s\n", intervalSeconds, tps)
 		fmt.Printf("(Transactions in this interval: %d)\n", currentTxCount)
-		fmt.Printf("📊 Cumulative total transactions: %d\n", totalTxs) // <-- THAY ĐỔI
+		fmt.Printf("📊 Cumulative total transactions: %d\n", totalTxs)
 		fmt.Printf("========================================\n\n")
 	}
 }
 
 func main() {
-	listener, err := net.Listen("tcp", "127.0.0.1:9002")
+	// ---- BẮT ĐẦU THAY ĐỔI ----
+
+	// 1. Xóa tệp socket cũ nếu nó tồn tại
+	if _, err := os.Stat(socketPath); err == nil {
+		if err := os.Remove(socketPath); err != nil {
+			panic(fmt.Sprintf("Failed to remove existing socket file: %v", err))
+		}
+	}
+
+	// 2. Lắng nghe trên Unix Domain Socket
+	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to start TX server: %v", err))
 	}
-	defer listener.Close()
-	fmt.Println("Go server is listening for committed transactions on port 9002")
+	// ---- KẾT THÚC THAY ĐỔI ----
 
-	// Chạy goroutine tính toán trong nền
+	defer listener.Close()
+	fmt.Printf("Go server is listening for committed transactions on socket: %s\n", socketPath)
+
 	go tpsCalculator()
 
 	for {
