@@ -816,15 +816,19 @@ impl Core {
                     let epoch = block.epoch;
                     let height = block.height;
 
-                    // Gửi khối đã cam kết đến Node để thực thi.
-                    if let Err(e) = self.commit_channel.send(block).await {
-                        warn!("Failed to send committed block to node: {}", e);
-                    }
+                    // TẠO MỘT TÁC VỤ RIÊNG BIỆT ĐỂ GỬI KHỐI ĐI
+                    // Bằng cách này, vòng lặp chính của Core không cần phải chờ
+                    // cho đến khi Node nhận được khối.
+                    let commit_sender = self.commit_channel.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = commit_sender.send(block).await {
+                            warn!("Failed to send committed block to node: {}", e);
+                        }
+                    });
                     
-                    // Thực hiện dọn dẹp sau khi đã gửi.
+                    // Thực hiện dọn dẹp ngay lập tức mà không bị chặn.
                     self.cleanup(digest, epoch, height).await
                 },
-
                 () = &mut timer, if epoch_start_time.elapsed() > epoch_timeout => {
                     warn!("Epoch {} has timed out. Forcing fallback to un-stick the protocol.", self.epoch);
                     let fallback_result = self.fallback(self.epoch).await;

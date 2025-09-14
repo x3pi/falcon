@@ -1,8 +1,7 @@
 use std::usize;
 
 use crate::Block;
-use crate::{config::Committee, SeqNumber};
-use crypto::Digest;
+use crate::{config::Committee};
 use log::{debug, info};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
