@@ -2,7 +2,7 @@
 
 use crate::config::{Committee, Parameters};
 use crate::error::{MempoolError, MempoolResult};
-use crate::messages::{Payload}; // Đảm bảo MempoolMessage được import
+use crate::messages::Payload;
 use crate::payload::PayloadMaker;
 use crate::synchronizer::Synchronizer;
 use consensus::{Block, ConsensusMempoolMessage, PayloadStatus, SeqNumber};
@@ -17,20 +17,20 @@ use std::collections::HashSet;
 #[cfg(feature = "benchmark")]
 use std::convert::TryInto as _;
 use store::Store;
-use tokio::io::AsyncWriteExt; // Import trait cần thiết
-use tokio::net::TcpStream;   // Import TcpStream
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::error::TrySendError;
 
 #[cfg(test)]
 #[path = "tests/core_tests.rs"]
 pub mod core_tests;
 
 // Struct mới để đóng gói dữ liệu gửi sang Go
+// GIỮ NGUYÊN STRUCT NÀY
 #[derive(Serialize, Deserialize, Debug)]
-struct CommittedTransactions {
-    epoch: SeqNumber,
-    height: SeqNumber,
-    transactions: Vec<Vec<u8>>,
+pub struct CommittedTransactions {
+    pub epoch: SeqNumber,
+    pub height: SeqNumber,
+    pub transactions: Vec<Vec<u8>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -51,7 +51,7 @@ pub struct Core {
     consensus_channel: Receiver<ConsensusMempoolMessage>,
     network_channel: Sender<NetMessage>,
     queue: HashSet<Digest>,
-    go_tx_connection: Option<TcpStream>, // Trường để quản lý kết nối TCP
+    go_tx_sender: Sender<CommittedTransactions>,
 }
 
 impl Core {
@@ -66,6 +66,9 @@ impl Core {
         core_channel: Receiver<MempoolMessage>,
         consensus_channel: Receiver<ConsensusMempoolMessage>,
         network_channel: Sender<NetMessage>,
+        // ---- BẮT ĐẦU THAY ĐỔI ----
+        go_tx_sender: Sender<CommittedTransactions>,
+        // ---- KẾT THÚC THAY ĐỔI ----
     ) -> Self {
         let queue = HashSet::with_capacity(parameters.queue_capacity);
         Self {
@@ -79,7 +82,7 @@ impl Core {
             network_channel,
             queue,
             payload_maker,
-            go_tx_connection: None, // Khởi tạo là chưa có kết nối
+            go_tx_sender,
         }
     }
 
@@ -179,7 +182,7 @@ impl Core {
         self.synchronizer.verify_payload(*block).await
     }
 
-    // --- HÀM CLEANUP ĐÃ ĐƯỢC THAY THẾ HOÀN TOÀN ---
+    // ---- BẮT ĐẦU THAY ĐỔI: VIẾT LẠI HOÀN TOÀN HÀM CLEANUP ----
     async fn cleanup(&mut self, digests: Vec<Digest>, epoch: SeqNumber, height: SeqNumber) {
         let mut all_transactions = Vec::new();
 
@@ -192,61 +195,36 @@ impl Core {
             }
         }
 
-        // 2. Chỉ gửi đi nếu có giao dịch để gửi
+        // 2. Chỉ gửi đi nếu có giao dịch
         if !all_transactions.is_empty() {
-            // Thiết lập kết nối nếu chưa có
-            if self.go_tx_connection.is_none() {
-                match TcpStream::connect("127.0.0.1:9002").await {
-                    Ok(stream) => {
-                        info!("Mempool connected to Go TX receiver on port 9002");
-                        self.go_tx_connection = Some(stream);
-                    }
-                    Err(e) => warn!("Mempool failed to connect to Go TX receiver: {}", e),
+            let committed_data = CommittedTransactions {
+                epoch,
+                height,
+                transactions: all_transactions,
+            };
+            
+            // 3. Gửi dữ liệu vào channel một cách không-chặn (non-blocking)
+            match self.go_tx_sender.try_send(committed_data) {
+                Ok(()) => {
+                    info!("Queued committed transactions from block (E:{}, H:{}) to be sent to Go.", epoch, height);
                 }
-            }
-
-            // Gửi dữ liệu đi
-            if let Some(stream) = &mut self.go_tx_connection {
-                let committed_data = CommittedTransactions {
-                    epoch,
-                    height,
-                    transactions: all_transactions,
-                };
-
-                let json_data = match serde_json::to_vec(&committed_data) {
-                    Ok(json) => json,
-                    Err(e) => {
-                        error!("Failed to serialize committed transactions: {}", e);
-                        // Vẫn tiếp tục để dọn dẹp
-                        self.synchronizer.cleanup(epoch, height).await;
-                        for x in &digests {
-                            self.queue.remove(x);
-                            self.store.delete(x.to_vec()).await;
-                        }
-                        return;
-                    }
-                };
-                
-                let len = json_data.len() as u32;
-                let len_bytes = len.to_be_bytes();
-
-                // Gửi độ dài rồi gửi dữ liệu
-                if stream.write_all(&len_bytes).await.is_err() || stream.write_all(&json_data).await.is_err() {
-                    warn!("Failed to send tx data to Go (connection lost). Resetting.");
-                    self.go_tx_connection = None;
-                } else {
-                    info!("Sent {} committed transactions from block (E:{}, H:{}) to Go", committed_data.transactions.len(), epoch, height);
+                Err(TrySendError::Full(_)) => {
+                    warn!("Channel to Go-Sender is full. Dropping committed transactions for block (E:{}, H:{}). The Go service might be slow or down.", epoch, height);
+                }
+                Err(TrySendError::Closed(_)) => {
+                    warn!("Channel to Go-Sender is closed. The Go-Sender task might have panicked.");
                 }
             }
         }
         
-        // 3. Thực hiện logic dọn dẹp ban đầu
+        // 4. Thực hiện logic dọn dẹp ban đầu (nhanh chóng và không bị chặn)
         self.synchronizer.cleanup(epoch, height).await;
         for x in &digests {
             self.queue.remove(x);
             self.store.delete(x.to_vec()).await;
         }
     }
+    // ---- KẾT THÚC THAY ĐỔI ----
 
     pub async fn run(&mut self) {
         let log = |result: Result<&(), &MempoolError>| match result {
