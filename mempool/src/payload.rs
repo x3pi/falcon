@@ -1,22 +1,25 @@
 use crate::core::MempoolMessage;
 use crate::messages::{Payload, Transaction};
 use crypto::{PublicKey, SignatureService};
-use log::info; // Thêm dòng này
-use tokio::sync::mpsc::error::TrySendError; // <-- BƯỚC 1: Import lỗi TrySendError
+use log::{info, warn};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
-use tokio::time::{sleep, Duration};
+// ---- BẮT ĐẦU THAY ĐỔI ----
+use tokio::time::{sleep, Duration, Instant}; // Import thêm Instant
+// ---- KẾT THÚC THAY ĐỔI ----
 
 struct Runner {
     transactions: Vec<Transaction>,
     size: usize,
     max_size: usize,
-    min_block_delay: u64,
+    min_block_delay: Duration, // <-- THAY ĐỔI: Chuyển sang Duration để dễ sử dụng
     name: PublicKey,
     signature_service: SignatureService,
     client_channel: Receiver<Transaction>,
     core_channel: Sender<MempoolMessage>,
     request_channel: Receiver<oneshot::Sender<Payload>>,
+    last_payload_time: Instant, // <-- THÊM VÀO: Biến theo dõi thời gian
 }
 
 impl Runner {
@@ -24,7 +27,7 @@ impl Runner {
         name: PublicKey,
         signature_service: SignatureService,
         max_size: usize,
-        min_block_delay: u64,
+        min_block_delay_ms: u64, // <-- THAY ĐỔI: Nhận miliseconds
         client_channel: Receiver<Transaction>,
         core_channel: Sender<MempoolMessage>,
         request_channel: Receiver<oneshot::Sender<Payload>>,
@@ -33,80 +36,84 @@ impl Runner {
             transactions: Vec::with_capacity(max_size),
             size: 0,
             max_size,
-            min_block_delay,
+            min_block_delay: Duration::from_millis(min_block_delay_ms), // <-- THAY ĐỔI
             name,
             signature_service,
             client_channel,
             core_channel,
             request_channel,
+            last_payload_time: Instant::now(), // <-- THÊM VÀO
         }
     }
 
-    async fn add(&mut self, tx: Transaction) -> Option<Payload> {
-        let length = tx.len();
-        let ret = match self.size + length > self.max_size {
-            //Nếu Vec đầy thì tạo một payload
-            true => Some(self.make().await),
-            false => None,
-        };
+    // ---- BẮT ĐẦU THAY ĐỔI: Logic tạo payload được tập trung hóa và có delay ----
+    async fn make_and_send_payload(&mut self) {
+        // 1. Kiểm tra xem đã đủ thời gian delay chưa
+        let elapsed = self.last_payload_time.elapsed();
+        if elapsed < self.min_block_delay {
+            let wait_time = self.min_block_delay - elapsed;
+            sleep(wait_time).await;
+        }
 
-        self.transactions.push(tx);
-        self.size += length;
-        ret
+        // 2. Tạo payload nếu có giao dịch
+        if !self.transactions.is_empty() {
+            let transactions = self.transactions.drain(..).collect();
+            self.size = 0;
+            let payload = Payload::new(transactions, self.name, self.signature_service.clone()).await;
+            info!("[PayloadRunner] Payload created with {} txs, sending to core.", payload.transactions.len());
+
+            let message = MempoolMessage::OwnPayload(payload);
+            if let Err(TrySendError::Full(_)) = self.core_channel.try_send(message) {
+                 panic!("[PANIC] Kênh từ PayloadRunner đến Core đã đầy!");
+            }
+        }
+        
+        // 3. Cập nhật lại thời gian sau khi đã tạo payload
+        self.last_payload_time = Instant::now();
     }
+    
+    // Hàm này chỉ tạo payload và trả về, dùng cho yêu cầu từ consensus
+    async fn make_for_request(&mut self) -> Payload {
+        let elapsed = self.last_payload_time.elapsed();
+        if elapsed < self.min_block_delay {
+            let wait_time = self.min_block_delay - elapsed;
+            sleep(wait_time).await;
+        }
 
-    async fn make(&mut self) -> Payload {
         let transactions = self.transactions.drain(..).collect();
-
-        // Dọn dẹp trạng thái.
         self.size = 0;
-
-        // Tạo một payload.
-        Payload::new(transactions, self.name, self.signature_service.clone()).await
+        let payload = Payload::new(transactions, self.name, self.signature_service.clone()).await;
+        
+        self.last_payload_time = Instant::now();
+        payload
     }
+    // ---- KẾT THÚC THAY ĐỔI ----
 
     async fn run(&mut self) {
         info!("[PayloadRunner] Vòng lặp cho node {} bắt đầu.", self.name);
         loop {
             tokio::select! {
                 Some(transaction) = self.client_channel.recv() => {
-                    // info!("[PayloadRunner] Đã nhận giao dịch từ client.");
-                    if let Some(payload) = self.add(transaction).await {
-                        info!("[PayloadRunner] Payload đã đầy, gửi đến core.");
-                        let message = MempoolMessage::OwnPayload(payload);
-
-                        // --- BƯỚC 2: THAY ĐỔI LOGIC GỬI ---
-                        // Sử dụng try_send để gửi ngay lập tức mà không chờ đợi.
-                        match self.core_channel.try_send(message) {
-                            Ok(()) => {
-                                // Gửi thành công, không cần làm gì thêm.
-                            },
-                            Err(TrySendError::Full(_)) => {
-                                // Kênh đã đầy -> Gây ra PANIC!
-                                panic!("[PANIC] Kênh từ PayloadRunner đến Core đã đầy! Core có thể đã bị bế tắc.");
-                            },
-                            Err(TrySendError::Closed(_)) => {
-                                // Kênh đã bị đóng (phía nhận đã bị hủy).
-                                panic!("[PANIC] Kênh từ PayloadRunner đến Core đã bị đóng! Core đã kết thúc đột ngột.");
-                            }
-                        }
-                        // --- KẾT THÚC THAY ĐỔI ---
-
-                        // Chờ một khoảng thời gian tối thiểu.
-                        sleep(Duration::from_millis(self.min_block_delay)).await;
+                    let tx_len = transaction.len();
+                    // Nếu thêm giao dịch này sẽ làm đầy payload, hãy tạo payload trước.
+                    if self.size + tx_len > self.max_size && !self.transactions.is_empty() {
+                        self.make_and_send_payload().await;
                     }
+                    self.transactions.push(transaction);
+                    self.size += tx_len;
                 },
                 Some(sender) = self.request_channel.recv() => {
                     info!("[PayloadRunner] Nhận yêu cầu tạo payload từ consensus.");
-                    let _ = sender.send(self.make().await);
+                    let payload = self.make_for_request().await;
+                    if let Err(_) = sender.send(payload) {
+                        warn!("[PayloadRunner] Failed to send requested payload back to consensus.");
+                    }
                 },
                 else => {
-                    // Nhánh này được thực thi khi tất cả các kênh đã đóng.
                     break;
                 }
             }
         }
-        // Dòng này chỉ được thực thi nếu vòng lặp bị phá vỡ.
         panic!("[PayloadRunner] Vòng lặp cho node {} đã dừng đột ngột!", self.name);
     }
 }
@@ -151,7 +158,7 @@ impl PayloadMaker {
         let payload = receiver
             .await
             .expect("Failed to receive payload from the inner runner");
-        match payload.size() {
+        match payload.transactions.len() {
             0 => None,
             _ => Some(payload),
         }
