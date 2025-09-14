@@ -1,4 +1,3 @@
-// tx_listener.go
 package main
 
 import (
@@ -19,8 +18,11 @@ type CommittedTransactions struct {
 	Transactions [][]byte `json:"transactions"`
 }
 
-// Biến đếm giao dịch toàn cục, sử dụng atomic để đảm bảo an toàn luồng
+// Biến đếm giao dịch cho mỗi chu kỳ TPS, sử dụng atomic để đảm bảo an toàn luồng
 var txCounter uint64
+
+// Biến đếm tổng số giao dịch từ khi khởi động, không bao giờ reset
+var totalTxCounter uint64 // <-- THAY ĐỔI
 
 func handleTxConnection(conn net.Conn) {
 	defer conn.Close()
@@ -51,8 +53,10 @@ func handleTxConnection(conn net.Conn) {
 		}
 
 		numTxs := len(data.Transactions)
-		// Tăng biến đếm một cách an toàn
+		// Tăng biến đếm cho chu kỳ hiện tại
 		atomic.AddUint64(&txCounter, uint64(numTxs))
+		// Tăng biến đếm tổng số giao dịch
+		atomic.AddUint64(&totalTxCounter, uint64(numTxs)) // <-- THAY ĐỔI
 
 		if numTxs == 0 {
 			fmt.Printf("⚪ Received Empty Block (Epoch: %d, Height: %d)\n",
@@ -71,28 +75,28 @@ func handleTxConnection(conn net.Conn) {
 	}
 }
 
-// Goroutine để tính toán và in TPS
+// Goroutine để tính toán và in TPS cũng như tổng số giao dịch
 func tpsCalculator() {
-	// ---- THAY ĐỔI Ở ĐÂY ----
 	const intervalSeconds = 20
 	ticker := time.NewTicker(intervalSeconds * time.Second)
-	// ---- KẾT THÚC THAY ĐỔI ----
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Đọc số lượng giao dịch hiện tại một cách an toàn
+		// Đọc số lượng giao dịch trong chu kỳ hiện tại
 		currentTxCount := atomic.LoadUint64(&txCounter)
-		// Reset biến đếm về 0 cho chu kỳ tiếp theo
+		// Reset biến đếm của chu kỳ về 0 cho chu kỳ tiếp theo
 		atomic.StoreUint64(&txCounter, 0)
 
-		// ---- THAY ĐỔI Ở ĐÂY ----
+		// Đọc tổng số giao dịch từ khi khởi động
+		totalTxs := atomic.LoadUint64(&totalTxCounter) // <-- THAY ĐỔI
+
 		// Tính TPS (giao dịch / số giây trong chu kỳ)
 		tps := float64(currentTxCount) / float64(intervalSeconds)
-		// ---- KẾT THÚC THAY ĐỔI ----
 
 		fmt.Printf("\n========================================\n")
 		fmt.Printf("📈 TPS over the last %d seconds: %.2f tx/s\n", intervalSeconds, tps)
-		fmt.Printf("(Total transactions in last %d seconds: %d)\n", intervalSeconds, currentTxCount)
+		fmt.Printf("(Transactions in this interval: %d)\n", currentTxCount)
+		fmt.Printf("📊 Cumulative total transactions: %d\n", totalTxs) // <-- THAY ĐỔI
 		fmt.Printf("========================================\n\n")
 	}
 }
@@ -105,7 +109,7 @@ func main() {
 	defer listener.Close()
 	fmt.Println("Go server is listening for committed transactions on port 9002")
 
-	// Chạy goroutine tính TPS trong nền
+	// Chạy goroutine tính toán trong nền
 	go tpsCalculator()
 
 	for {
