@@ -109,6 +109,27 @@ impl Core {
             self.queue.len() < self.parameters.queue_capacity,
             MempoolError::MempoolFull
         );
+        #[cfg(feature = "benchmark")]
+        // NOTE: This log entry is used to compute performance.
+        info!("Payload {:?} contains {} B", digest, payload.size());
+
+        #[cfg(feature = "benchmark")]
+        for tx in &payload.transactions {
+            // Look for sample txs (they all start with 0) and gather their
+            // txs id (the next 8 bytes).
+            if tx[0] == 0u8 && tx.len() > 8 {
+                if let Ok(id) = tx[1..9].try_into() {
+                    // NOTE: This log entry is used to compute performance.
+                    info!(
+                        "Payload {:?} contains sample tx {}",
+                        digest,
+                        u64::from_be_bytes(id)
+                    );
+                }
+            }
+        }
+
+
         self.store_payload(digest.to_vec(), &payload).await;
         let message = MempoolMessage::Payload(payload);
         self.transmit(&message, None).await

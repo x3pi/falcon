@@ -9,7 +9,7 @@ use log::{debug, info, warn};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
 
-pub const MAX_BLOCK_BUFFER: usize = 10000;
+pub const MAX_BLOCK_BUFFER: usize = 50000;
 
 async fn try_to_commit(
     mut cur_ind: usize,
@@ -39,6 +39,16 @@ async fn try_to_commit(
 
         if !block.payload.is_empty() {
             info!("Committed {}", block);
+
+            #[cfg(feature = "benchmark")]
+            for x in &block.payload {
+                info!(
+                    "Committed B{}({}) epoch {}",
+                    block.height,
+                    base64::encode(x),
+                    block.epoch,
+                );
+            }
             digests.extend(block.payload.clone());
         } else {
             debug!("Committed Empty Block {}", block);
