@@ -39,7 +39,7 @@ pub enum NodeError {
 
 // ---- BẮT ĐẦU CẢI TIẾN LOGIC NOTIFIER ----
 
-type GoNotificationMsg = (Vec<Digest>, SeqNumber, SeqNumber);
+type GoNotificationMsg = (Vec<Vec<u8>>, SeqNumber, SeqNumber);
 
 #[derive(Serialize)]
 struct GoNotificationPayload {
@@ -93,7 +93,7 @@ async fn go_worker_task(id: usize, mut work_receiver: Receiver<GoNotificationMsg
             let payload = GoNotificationPayload {
                 epoch,
                 height,
-                transactions: digests.into_iter().map(|d| d.0.to_vec()).collect(),
+                transactions: digests,
             };
 
             let json_data = match serde_json::to_vec(&payload) {
