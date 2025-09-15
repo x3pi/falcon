@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package processor;
+option go_package = "/proto";
+
+message ProcessedVirtualTransactionProto {
+    bytes transaction_data = 1;
+    bytes execute_result_data = 2; 
+}
+
+message ProcessedVirtualTransactionsResponse {
+    repeated ProcessedVirtualTransactionProto processed_txs = 1;
+    string error_message = 2;
+}

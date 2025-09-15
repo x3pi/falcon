@@ -1,0 +1,19 @@
+syntax = "proto3";
+package message;
+
+option go_package = "/proto";
+option java_package = "com.meta_node.protos.compiled.message";
+
+message Header {
+    string Command = 1;
+    bytes Pubkey = 2;
+    bytes ToAddress = 3;
+    bytes Sign = 4;
+    string Version = 5;
+    string ID = 6;
+}
+
+message Message {
+    Header Header = 1;
+    bytes Body = 2;
+}

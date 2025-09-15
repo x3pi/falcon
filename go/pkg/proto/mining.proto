@@ -1,0 +1,140 @@
+// proto/rpc_commands.proto
+syntax = "proto3";
+
+package mining;
+option go_package = "/proto";
+
+// Common types
+message Hash {
+  bytes value = 1; // 32 bytes
+}
+
+message Address {
+  bytes value = 1; // 20 bytes
+}
+
+// Request/Response for GetExecuteSCResultsHash
+message GetExecuteSCResultsHashRequest {
+  uint64 block_number = 1;
+}
+
+message GetExecuteSCResultsHashResponse {
+  Hash hash = 1;
+}
+
+// Request/Response for SendRawTransactionWithDeviceKey
+message SendRawTransactionWithDeviceKeyRequest {
+  bytes raw_transaction_with_device_key = 1;
+}
+
+message SendRawTransactionWithDeviceKeyResponse {
+  Hash tx_hash = 1;
+}
+
+// Request/Response for GetDeviceKey
+message GetDeviceKeyRequest {
+  Hash hash = 1;
+}
+
+message GetDeviceKeyResponse {
+  Hash device_key = 1;
+}
+
+// Request/Response for GetAccountState
+message GetAccountStateRequest {
+  Address address = 1;
+  oneof block_identifier {
+    uint64 block_number = 2;
+    Hash block_hash = 3;
+  }
+}
+
+message GetAccountStateResponse {
+  string address = 1;
+  string balance = 2;
+  string pending_balance = 3;
+  Hash device_key = 4;
+  Hash last_hash = 5;
+  string public_key_bls = 6;
+  uint64 nonce = 7;
+  uint32 account_type = 8;
+}
+
+// Request/Response for SearchTransactions
+message SearchTransactionsRequest {
+  string query = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message SearchTransactionsResponse {
+  uint64 total = 1;
+  repeated string transactions_json = 2;
+}
+
+// Request/Response for GetJob
+message GetJobRequest {
+  Address address = 1;
+}
+
+message Job {
+  string job_id = 1;
+  string creator = 2;
+  string assignee = 3;
+  string job_type = 4;
+  string status = 5;
+  string data = 6;
+  double reward = 7;
+  int64 created_at = 8;
+  int64 completed_at = 9;
+  string tx_hash = 10;
+}
+message GetJobResponse {
+  Job job = 1;
+}
+
+// Request/Response for CompleteJob
+message CompleteJobRequest {
+  Address address = 1;
+  string job_id = 2;
+  Hash hash_execute = 3;
+}
+
+message CompleteJobResponse {
+  bool success = 1;
+}
+
+// Request/Response for GetTransactionHistoryByAddress
+message GetTransactionHistoryByAddressRequest {
+  Address address = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message TransactionRecord {
+  string tx_id = 1;
+  string job_id = 2;
+  string sender = 3;
+  string recipient = 4;
+  double amount = 5;
+  int64 timestamp = 6;
+  string status = 7;
+}
+
+// ĐÃ SỬA: Thêm trường `error`
+message GetTransactionHistoryByAddressResponse {
+  uint64 total = 1;
+  repeated TransactionRecord records = 2;
+  string error = 3; // Bổ sung trường này
+}
+
+// Request/Response for GetTransactionHistoryByJobID
+message GetTransactionHistoryByJobIDRequest {
+  string job_id = 1;
+}
+
+// ĐÃ SỬA: Thêm trường `error`
+message GetTransactionHistoryByJobIDResponse {
+  TransactionRecord record = 1;
+  string error = 2; // Bổ sung trường này
+}

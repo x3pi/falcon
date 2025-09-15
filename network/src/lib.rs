@@ -74,7 +74,10 @@ impl NetSender {
                     return;
                 }
             };
-            let mut transport = Framed::new(stream, LengthDelimitedCodec::new());
+            let codec = LengthDelimitedCodec::builder() // Sử dụng LengthDelimitedCodec::builder()
+            .max_frame_length(100_000_000) // Tăng giới hạn lên 100 MB hoặc hơn
+            .new_codec();
+            let mut transport = Framed::new(stream, codec);
             while let Some(message) = rx.recv().await {
                 match transport.send(message).await {
                     Ok(_) => debug!("Successfully sent message to {}", address),
@@ -122,7 +125,10 @@ impl<Message: 'static + Send + DeserializeOwned + Debug> NetReceiver<Message> {
 
     async fn spawn_worker(socket: TcpStream, peer: SocketAddr, deliver: Sender<Message>) {
         tokio::spawn(async move {
-            let mut transport = Framed::new(socket, LengthDelimitedCodec::new());
+            let codec = LengthDelimitedCodec::builder() // Sử dụng LengthDelimitedCodec::builder()
+            .max_frame_length(100_000_000) // Tăng giới hạn lên 100 MB hoặc hơn
+            .new_codec();
+            let mut transport = Framed::new(socket, codec);
             while let Some(frame) = transport.next().await {
                 match frame
                     .map_err(NetworkError::from)

@@ -1,0 +1,27 @@
+syntax = "proto3";
+package event_log;
+
+option go_package = "/proto";
+option java_package = "com.meta_node.protos.compiled.event_log";
+
+message EventLog {
+   bytes TransactionHash = 2; 
+   bytes Address = 3;
+   bytes Data = 4; 
+   repeated bytes Topics = 5;
+}
+
+message EventLogsHashData {
+  repeated bytes Hashes = 1;
+}
+
+message EventLogs{
+    repeated EventLog EventLogs = 1;
+}
+
+
+// THÊM MESSAGE MỚI NÀY VÀO CUỐI FILE
+message MapEventLogs {
+  // Key là địa chỉ dạng hex string, value là danh sách các event log
+  map<string, EventLogs> events_by_address = 1;
+}

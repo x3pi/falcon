@@ -9,13 +9,22 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os" // <-- THÊM VÀO
+	"os"
 	"sync/atomic"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/meta-node-blockchain/meta-node/pkg/bls"
+	p_common "github.com/meta-node-blockchain/meta-node/pkg/common"
+	"github.com/meta-node-blockchain/meta-node/pkg/network"
+	t_network "github.com/meta-node-blockchain/meta-node/types/network"
 )
 
 // Khai báo đường dẫn socket ở một nơi để dễ thay đổi
-const socketPath = "/tmp/consensus.sock" // <-- THÊM VÀO
+const socketPath = "/tmp/consensus.sock"
+
+// Khai báo địa chỉ và port của node nhận giao dịch
+const receiverNodeAddress = "0.0.0.0:4201"
 
 // CommittedTransactions khớp với struct trong Rust
 type CommittedTransactions struct {
@@ -24,14 +33,45 @@ type CommittedTransactions struct {
 	Transactions [][]byte `json:"transactions"`
 }
 
-// (Các biến toàn cục giữ nguyên)
+// Khai báo các biến toàn cục cho network module
 var txCounter uint64
 var totalTxCounter uint64
 
-// (Hàm handleTxConnection không thay đổi)
+// Khởi tạo các đối tượng global để tái sử dụng
+var messageSender t_network.MessageSender
+var nodeConnection t_network.Connection
+
+func init() {
+
+	// Khởi tạo một đối tượng MessageSender.
+	messageSender = network.NewMessageSender("v1.0.0")
+	// Khởi tạo một đối tượng Connection.
+	nodeConnection = network.NewConnection(
+		common.Address{}, // Địa chỉ có thể là 0 nếu không quan trọng.
+		"TX_SENDER",
+		network.DefaultConfig(),
+	)
+	// Thiết lập địa chỉ đích.
+	nodeConnection.SetRealConnAddr(receiverNodeAddress)
+}
+
+// handleTxConnection xử lý kết nối từ mempool và gửi giao dịch đi
 func handleTxConnection(conn net.Conn) {
 	defer conn.Close()
 	fmt.Printf("Accepted new mempool connection from: %s\n", conn.RemoteAddr().String())
+
+	// Đảm bảo kết nối tới node đích đã sẵn sàng
+	if !nodeConnection.IsConnect() {
+		fmt.Printf("Kết nối tới node đích %s chưa sẵn sàng. Đang thử kết nối...\n", receiverNodeAddress)
+		err := nodeConnection.Connect()
+		if err != nil {
+			fmt.Printf("Lỗi khi kết nối tới node đích: %v\n", err)
+			return
+		}
+	}
+
+	// Khởi chạy goroutine đọc request
+	go nodeConnection.ReadRequest()
 
 	for {
 		lenBuf := make([]byte, 4)
@@ -62,13 +102,18 @@ func handleTxConnection(conn net.Conn) {
 		atomic.AddUint64(&totalTxCounter, uint64(numTxs))
 
 		if numTxs == 0 {
-			fmt.Printf("⚪ Received Empty Block (Epoch: %d, Height: %d)\n",
-				data.Epoch, data.Height)
+			// fmt.Printf("⚪ Received Empty Block (Epoch: %d, Height: %d)\n",
+			// 	data.Epoch, data.Height)
 		} else {
 			fmt.Printf("🚚 Received %d transactions from Block (Epoch: %d, Height: %d)\n",
 				numTxs, data.Epoch, data.Height)
 
+			// Gửi từng giao dịch tới node đích
 			for i, tx := range data.Transactions {
+				sendErr := messageSender.SendBytes(nodeConnection, p_common.TransactionsFromSubTopic, tx)
+				if sendErr != nil {
+					fmt.Printf("Lỗi khi gửi giao dịch: %v\n", sendErr)
+				}
 				if i < 2 {
 					fmt.Printf("  - TX %d: %s\n", i+1, base64.StdEncoding.EncodeToString(tx))
 				}
@@ -77,7 +122,7 @@ func handleTxConnection(conn net.Conn) {
 	}
 }
 
-// (Hàm tpsCalculator không thay đổi)
+// tpsCalculator không thay đổi
 func tpsCalculator() {
 	const intervalSeconds = 20
 	ticker := time.NewTicker(intervalSeconds * time.Second)
@@ -98,7 +143,7 @@ func tpsCalculator() {
 }
 
 func main() {
-	// ---- BẮT ĐẦU THAY ĐỔI ----
+	bls.Init()
 
 	// 1. Xóa tệp socket cũ nếu nó tồn tại
 	if _, err := os.Stat(socketPath); err == nil {
@@ -112,7 +157,6 @@ func main() {
 	if err != nil {
 		panic(fmt.Sprintf("Failed to start TX server: %v", err))
 	}
-	// ---- KẾT THÚC THAY ĐỔI ----
 
 	defer listener.Close()
 	fmt.Printf("Go server is listening for committed transactions on socket: %s\n", socketPath)
