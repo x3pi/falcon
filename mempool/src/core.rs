@@ -255,6 +255,17 @@ impl Core {
                             let _ = sender.send(status);
                         },
                         ConsensusMempoolMessage::Cleanup(digests, epoch, height) => self.cleanup(digests, epoch, height).await,
+                        ConsensusMempoolMessage::GetFullTransactions(digests, sender) => { // THÊM NHÁNH MỚI
+                            let mut all_transactions = Vec::new();
+                            for digest in &digests {
+                                if let Ok(Some(payload_bytes)) = self.store.read(digest.to_vec()).await {
+                                    if let Ok(payload) = bincode::deserialize::<Payload>(&payload_bytes) {
+                                        all_transactions.extend(payload.transactions);
+                                    }
+                                }
+                            }
+                            let _ = sender.send(all_transactions);
+                        },
                     }
                     Ok(())
                 },

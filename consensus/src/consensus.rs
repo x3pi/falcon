@@ -6,7 +6,7 @@ use crate::mempool::{ConsensusMempoolMessage, MempoolDriver};
 use crate::messages::Block;
 use crate::synchronizer::Synchronizer;
 use crate::core::SeqNumber;
-use crypto::{Digest, PublicKey, SignatureService};
+use crypto::{ PublicKey, SignatureService};
 use futures::future::join_all;
 use log::info;
 use network::{NetReceiver, NetSender};
