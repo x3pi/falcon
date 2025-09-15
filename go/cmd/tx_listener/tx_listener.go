@@ -12,10 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/meta-node-blockchain/meta-node/pkg/bls"
-	"github.com/meta-node-blockchain/meta-node/pkg/network"
-	t_network "github.com/meta-node-blockchain/meta-node/types/network"
 )
 
 // Khai báo đường dẫn socket ở một nơi để dễ thay đổi
@@ -36,40 +33,40 @@ var txCounter uint64
 var totalTxCounter uint64
 
 // Khởi tạo các đối tượng global để tái sử dụng
-var messageSender t_network.MessageSender
-var nodeConnection t_network.Connection
+// var messageSender t_network.MessageSender
+// var nodeConnection t_network.Connection
 
-func init() {
+// func init() {
 
-	// Khởi tạo một đối tượng MessageSender.
-	messageSender = network.NewMessageSender("v1.0.0")
-	// Khởi tạo một đối tượng Connection.
-	nodeConnection = network.NewConnection(
-		common.Address{}, // Địa chỉ có thể là 0 nếu không quan trọng.
-		"TX_SENDER",
-		network.DefaultConfig(),
-	)
-	// Thiết lập địa chỉ đích.
-	nodeConnection.SetRealConnAddr(receiverNodeAddress)
-}
+// 	// Khởi tạo một đối tượng MessageSender.
+// 	messageSender = network.NewMessageSender("v1.0.0")
+// 	// Khởi tạo một đối tượng Connection.
+// 	nodeConnection = network.NewConnection(
+// 		common.Address{}, // Địa chỉ có thể là 0 nếu không quan trọng.
+// 		"TX_SENDER",
+// 		network.DefaultConfig(),
+// 	)
+// 	// Thiết lập địa chỉ đích.
+// 	nodeConnection.SetRealConnAddr(receiverNodeAddress)
+// }
 
 // handleTxConnection xử lý kết nối từ mempool và gửi giao dịch đi
 func handleTxConnection(conn net.Conn) {
 	defer conn.Close()
 	fmt.Printf("Accepted new mempool connection from: %s\n", conn.RemoteAddr().String())
 
-	// Đảm bảo kết nối tới node đích đã sẵn sàng
-	if !nodeConnection.IsConnect() {
-		fmt.Printf("Kết nối tới node đích %s chưa sẵn sàng. Đang thử kết nối...\n", receiverNodeAddress)
-		err := nodeConnection.Connect()
-		if err != nil {
-			fmt.Printf("Lỗi khi kết nối tới node đích: %v\n", err)
-			return
-		}
-	}
+	// // Đảm bảo kết nối tới node đích đã sẵn sàng
+	// if !nodeConnection.IsConnect() {
+	// 	fmt.Printf("Kết nối tới node đích %s chưa sẵn sàng. Đang thử kết nối...\n", receiverNodeAddress)
+	// 	err := nodeConnection.Connect()
+	// 	if err != nil {
+	// 		fmt.Printf("Lỗi khi kết nối tới node đích: %v\n", err)
+	// 		return
+	// 	}
+	// }
 
-	// Khởi chạy goroutine đọc request
-	go nodeConnection.ReadRequest()
+	// // Khởi chạy goroutine đọc request
+	// go nodeConnection.ReadRequest()
 
 	for {
 		lenBuf := make([]byte, 4)
