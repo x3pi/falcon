@@ -24,6 +24,7 @@ pub enum ConsensusMempoolMessage {
     GetFullTransactions(Vec<Digest>, oneshot::Sender<Vec<Vec<u8>>>),
 }
 
+#[derive(Clone)]
 pub struct MempoolDriver {
     mempool_channel: Sender<ConsensusMempoolMessage>,
 }

@@ -6,9 +6,7 @@ use crate::config::{Committee, Parameters, Stake};
 use crate::error::{ConsensusError, ConsensusResult};
 use crate::filter::FilterInput;
 use crate::mempool::MempoolDriver;
-use crate::messages::{
-    ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, ReadyVote,
-};
+use crate::messages::{ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, ReadyVote};
 use crate::synchronizer::Synchronizer;
 use async_recursion::async_recursion;
 use crypto::{Digest, PublicKey, SignatureService};
@@ -22,7 +20,7 @@ use tokio::time::{sleep, Duration, Instant};
 #[path = "tests/core_tests.rs"]
 pub mod core_tests;
 
-pub type SeqNumber = u64; 
+pub type SeqNumber = u64;
 pub type HeightNumber = u8;
 
 pub const RBC_ECHO: u8 = 0;
@@ -175,7 +173,7 @@ impl Core {
 
         if epoch > self.parameters.pruning_threshold {
             let prune_epoch = epoch - self.parameters.pruning_threshold;
-            
+
             for h in 0..self.committee.size() as SeqNumber {
                 let rank_to_prune = Self::rank(prune_epoch, h, &self.committee);
                 let key_to_prune: Vec<u8> = rank_to_prune.to_le_bytes().into();
@@ -231,7 +229,10 @@ impl Core {
         }
         debug!("start rbc epoch {}", self.epoch);
 
-        info!("[BƯỚC 3] Consensus core: Đang yêu cầu payload từ mempool driver cho epoch {}.", self.epoch);
+        info!(
+            "[BƯỚC 3] Consensus core: Đang yêu cầu payload từ mempool driver cho epoch {}.",
+            self.epoch
+        );
 
         let payload = self
             .mempool_driver
@@ -241,7 +242,10 @@ impl Core {
         if payload.is_empty() {
             info!("[BƯỚC 4] Consensus core: Mempool trả về payload trống. Bỏ qua đề xuất khối lần này.");
         } else {
-            info!("[BƯỚC 4] Consensus core: Mempool trả về payload với {} digest.", payload.len());
+            info!(
+                "[BƯỚC 4] Consensus core: Mempool trả về payload với {} digest.",
+                payload.len()
+            );
         }
 
         let block = Block::new(
@@ -443,7 +447,7 @@ impl Core {
     async fn rbc_advance(&mut self, epoch: SeqNumber) -> ConsensusResult<()> {
         if epoch > self.epoch {
             self.epoch = epoch;
-            self.generate_rbc_proposal().await?; 
+            self.generate_rbc_proposal().await?;
         }
         Ok(())
     }
@@ -520,7 +524,8 @@ impl Core {
                     .await?;
                     self.handle_prepare(&pre2).await?;
                 } else if prepare.phase == PRE_TWO {
-                    self.aba_timeouts.insert((prepare.epoch, prepare.height), Instant::now());
+                    self.aba_timeouts
+                        .insert((prepare.epoch, prepare.height), Instant::now());
 
                     let aba_val = ABAVal::new(
                         self.name,
@@ -627,7 +632,6 @@ impl Core {
         }
         Ok(())
     }
-    
 
     async fn handle_aba_mux(&mut self, aba_mux: &ABAVal) -> ConsensusResult<()> {
         debug!(
@@ -635,11 +639,15 @@ impl Core {
             aba_mux.epoch, aba_mux.height
         );
         aba_mux.verify()?;
-    
-        if *self.aba_ends.entry((aba_mux.epoch, aba_mux.height)).or_insert(false) {
+
+        if *self
+            .aba_ends
+            .entry((aba_mux.epoch, aba_mux.height))
+            .or_insert(false)
+        {
             return Ok(());
         }
-    
+
         if let Some(start_time) = self.aba_timeouts.get(&(aba_mux.epoch, aba_mux.height)) {
             let timeout_duration = Duration::from_millis(self.parameters.timeout_delay * 2);
             if start_time.elapsed() > timeout_duration {
@@ -647,50 +655,52 @@ impl Core {
                     "ABA TIMEOUT on epoch {}, height {}, round {}. Deterministically choosing 1 (OPT) to break deadlock.",
                     aba_mux.epoch, aba_mux.height, aba_mux.round
                 );
-    
-                return self.process_aba_output(aba_mux.epoch, aba_mux.height, aba_mux.round, OPT as usize).await;
+
+                return self
+                    .process_aba_output(aba_mux.epoch, aba_mux.height, aba_mux.round, OPT as usize)
+                    .await;
             }
         }
-    
+
         let mux_votes = self
             .aba_mux_values
             .entry((aba_mux.epoch, aba_mux.height, aba_mux.round))
             .or_insert_with(|| [HashSet::new(), HashSet::new()]);
-    
+
         if !mux_votes[aba_mux.val].insert(aba_mux.author) {
             return Ok(());
         }
-    
+
         let num_opt_votes = mux_votes[OPT as usize].len() as Stake;
         let num_pes_votes = mux_votes[PES as usize].len() as Stake;
-        
+
         let val_flags = self
             .aba_values_flag
             .entry((aba_mux.epoch, aba_mux.height, aba_mux.round))
             .or_insert([false, false]);
-    
+
         let mut decision: Option<usize> = None;
-    
+
         if num_opt_votes >= self.committee.quorum_threshold() {
             decision = Some(OPT as usize);
         } else if num_pes_votes >= self.committee.quorum_threshold() {
             decision = Some(PES as usize);
-        }
-        else if num_opt_votes + num_pes_votes >= self.committee.quorum_threshold() {
+        } else if num_opt_votes + num_pes_votes >= self.committee.quorum_threshold() {
             if val_flags[OPT as usize] && val_flags[PES as usize] {
-                 decision = Some(OPT as usize);
-            } 
-            else if val_flags[OPT as usize] {
+                decision = Some(OPT as usize);
+            } else if val_flags[OPT as usize] {
                 decision = Some(OPT as usize);
             } else if val_flags[PES as usize] {
                 decision = Some(PES as usize);
             }
         }
-    
+
         if let Some(decided_value) = decision {
-            return self.process_aba_output(aba_mux.epoch, aba_mux.height, aba_mux.round, decided_value).await;
+            return self
+                .process_aba_output(aba_mux.epoch, aba_mux.height, aba_mux.round, decided_value)
+                .await;
         }
-    
+
         Ok(())
     }
 
@@ -790,10 +800,10 @@ impl Core {
         }
         let mut previous_epoch = self.epoch;
         let mut epoch_start_time = Instant::now();
-        let epoch_timeout = Duration::from_millis(self.parameters.timeout_delay * 5); 
+        let epoch_timeout = Duration::from_millis(self.parameters.timeout_delay * 5);
 
         loop {
-            let timer = sleep(Duration::from_millis(5)); 
+            let timer = sleep(Duration::from_millis(5));
             tokio::pin!(timer);
 
             let result = tokio::select! {
@@ -809,27 +819,33 @@ impl Core {
                         ConsensusMessage::ABAMuxMsg(mux)=> self.handle_aba_mux(&mux).await,
                         ConsensusMessage::ABAOutputMsg(output)=>self.handle_aba_output(&output).await,
                         ConsensusMessage::PrePareMsg(prepare)=>self.handle_prepare(&prepare).await,
-                        ConsensusMessage::LoopBackMsg(block) => self.handle_loopback(&block).await, 
+                        ConsensusMessage::LoopBackMsg(block) => self.handle_loopback(&block).await,
                         ConsensusMessage::SyncRequestMsg(epoch,height, sender) => self.handle_sync_request(epoch,height, sender).await,
                         ConsensusMessage::SyncReplyMsg(block) => self.handle_sync_reply(&block).await,
                     }
                 },
                 Some((digests, epoch, height)) = self.rx_commit_signal.recv() => {
+                    let digests_clone = digests.clone();
 
-                    let full_transactions = match self.mempool_driver.get_full_transactions(digests.clone()).await {
-                        Ok(txs) => txs,
-                        Err(e) => {
-                            error!("[ConsensusCore] Failed to get full transactions for block (E:{}, H:{}): {}", epoch, height, e);
-                            continue; // Bỏ qua nếu không lấy được dữ liệu.
+                    let tx_commit_notification = self.tx_commit_notification.clone();
+                    let mut mempool_driver = self.mempool_driver.clone();
+
+                    // Spawn một tác vụ mới để xử lý việc lấy dữ liệu và gửi thông báo
+                    tokio::spawn(async move {
+                        let full_transactions = match mempool_driver.get_full_transactions(digests_clone).await {
+                            Ok(txs) => txs,
+                            Err(e) => {
+                                error!("[ConsensusCore] Failed to get full transactions for block (E:{}, H:{}): {}", epoch, height, e);
+                                return;
+                            }
+                        };
+
+                        let notification = (full_transactions, epoch, height);
+                        if let Err(TrySendError::Full(_)) = tx_commit_notification.try_send(notification) {
+                            warn!("[ConsensusCore] Go-Notifier channel is full. Dropping notification for block (E:{}, H:{}).", epoch, height);
                         }
-                    };
-                    
-                    // GỬI TÍN HIỆU CHO NOTIFIER (KHÔNG CHẶN)
-                    let notification = (full_transactions, epoch, height);
-                    if let Err(TrySendError::Full(_)) = self.tx_commit_notification.try_send(notification) {
-                        warn!("[ConsensusCore] Go-Notifier channel is full. Dropping notification for block (E:{}, H:{}).", epoch, height);
-                    }
-                    
+                    });
+
 
                     // GỌI CLEANUP MỘT CÁCH ĐỘC LẬP
                     // Việc dọn dẹp mempool vẫn diễn ra như bình thường và không liên quan đến việc gửi sang Go.
@@ -839,18 +855,18 @@ impl Core {
                 () = &mut timer, if epoch_start_time.elapsed() > epoch_timeout => {
                     warn!("Epoch {} has timed out. Forcing fallback to un-stick the protocol.", self.epoch);
                     let fallback_result = self.fallback(self.epoch).await;
-                    epoch_start_time = Instant::now(); 
+                    epoch_start_time = Instant::now();
                     fallback_result
                 },
-    
+
 
                 else => break,
             };
 
             if self.epoch > previous_epoch {
                 info!("Advanced to new epoch {}", self.epoch);
-                epoch_start_time = Instant::now(); 
-                previous_epoch = self.epoch; 
+                epoch_start_time = Instant::now();
+                previous_epoch = self.epoch;
             }
 
             match result {
@@ -868,7 +884,7 @@ impl Core {
             block.epoch, block.height
         );
         self.store_block(block).await;
-        
+
         self.process_rbc_output(block.epoch, block.height).await
     }
 }
