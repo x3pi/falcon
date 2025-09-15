@@ -100,8 +100,8 @@ func handleTxConnection(conn net.Conn) {
 			// fmt.Printf("⚪ Received Empty Block (Epoch: %d, Height: %d)\n",
 			// 	data.Epoch, data.Height)
 		} else {
-			fmt.Printf("🚚 Received %d transactions from Block (Epoch: %d, Height: %d)\n",
-				numTxs, data.Epoch, data.Height)
+			fmt.Printf("🚚 Received %d transactions from Block (Epoch: %d, Height: %d , Len tx0: %d)\n",
+				numTxs, data.Epoch, data.Height, len(data.Transactions[0]))
 
 			// Gửi từng giao dịch tới node đích
 			// for i, tx := range data.Transactions {
