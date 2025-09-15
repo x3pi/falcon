@@ -175,22 +175,18 @@ impl Core {
     }
 
     async fn get_payload(&mut self, max: usize) -> MempoolResult<Vec<Digest>> {
-        if self.queue.is_empty() {
-            if let Some(payload) = self.payload_maker.make().await {
-                let digest = payload.digest();
-                self.process_own_payload(&digest, payload).await?;
-                Ok(vec![digest])
-            } else {
-                Ok(Vec::new())
-            }
-        } else {
-            let digest_len = Digest::default().size();
-            let digests: Vec<_> = self.queue.iter().take(max / digest_len).cloned().collect();
-            for x in &digests {
-                self.queue.remove(x);
-            }
-            Ok(digests)
+        let digest_len = Digest::default().size();
+        let mut digests: Vec<_> = self.queue.iter().take(max / digest_len).cloned().collect();
+        for x in &digests {
+            self.queue.remove(x);
         }
+        // THAY ĐỔI: Luôn gọi make() để tạo payload mới từ các giao dịch còn lại trong hàng đợi.
+        if let Some(payload) = self.payload_maker.make().await {
+            let digest = payload.digest();
+            self.process_own_payload(&digest, payload).await?;
+            digests.push(digest);
+        }
+        Ok(digests)
     }
 
     async fn verify_payload(&mut self, block: Box<Block>) -> MempoolResult<bool> {
