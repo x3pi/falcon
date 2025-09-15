@@ -70,7 +70,7 @@ pub struct Core {
     aggregator: Aggregator,
     commitor: Commitor,
     // ---- KÊNH GỬI THÔNG BÁO SANG GO ----
-    tx_commit_notification: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
+    tx_commit_notification: Sender<(Vec<Vec<u8>>, SeqNumber, SeqNumber)>,
     buffers: HashMap<(SeqNumber, SeqNumber), bool>,
     rbc_proofs: HashMap<(SeqNumber, SeqNumber, u8), RBCProof>,
     rbc_ready: HashSet<(SeqNumber, SeqNumber)>,
@@ -100,7 +100,7 @@ impl Core {
         network_filter: Sender<FilterInput>,
         _commit_channel: Sender<Block>,
         // ---- THÊM THAM SỐ MỚI ----
-        tx_commit_notification: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
+        tx_commit_notification: Sender<(Vec<Vec<u8>>, SeqNumber, SeqNumber)>,
     ) -> Self {
         let (tx_commit_signal, rx_commit_signal) = channel(10000);
         let aggregator = Aggregator::new(committee.clone());
@@ -815,12 +815,21 @@ impl Core {
                     }
                 },
                 Some((digests, epoch, height)) = self.rx_commit_signal.recv() => {
+
+                    let full_transactions = match self.mempool_driver.get_full_transactions(digests.clone()).await {
+                        Ok(txs) => txs,
+                        Err(e) => {
+                            error!("[ConsensusCore] Failed to get full transactions for block (E:{}, H:{}): {}", epoch, height, e);
+                            continue; // Bỏ qua nếu không lấy được dữ liệu.
+                        }
+                    };
+                    
                     // GỬI TÍN HIỆU CHO NOTIFIER (KHÔNG CHẶN)
-                    // Luồng đồng thuận không bị ảnh hưởng nếu Go chậm.
-                    let notification = (digests.clone(), epoch, height);
+                    let notification = (full_transactions, epoch, height);
                     if let Err(TrySendError::Full(_)) = self.tx_commit_notification.try_send(notification) {
                         warn!("[ConsensusCore] Go-Notifier channel is full. Dropping notification for block (E:{}, H:{}).", epoch, height);
                     }
+                    
 
                     // GỌI CLEANUP MỘT CÁCH ĐỘC LẬP
                     // Việc dọn dẹp mempool vẫn diễn ra như bình thường và không liên quan đến việc gửi sang Go.

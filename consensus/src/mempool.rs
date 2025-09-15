@@ -1,3 +1,5 @@
+// consensus/src/mempool.rs
+
 use crate::core::SeqNumber;
 use crate::error::{ConsensusError, ConsensusResult};
 use crate::messages::Block;
@@ -18,6 +20,8 @@ pub enum ConsensusMempoolMessage {
     Get(usize, oneshot::Sender<Vec<Digest>>),
     Verify(Box<Block>, oneshot::Sender<PayloadStatus>),
     Cleanup(Vec<Digest>, SeqNumber, SeqNumber),
+    // THÊM DÒNG NÀY: Yêu cầu dữ liệu giao dịch đầy đủ
+    GetFullTransactions(Vec<Digest>, oneshot::Sender<Vec<Vec<u8>>>),
 }
 
 pub struct MempoolDriver {
@@ -33,7 +37,6 @@ impl MempoolDriver {
         let (sender, receiver) = oneshot::channel();
         let message = ConsensusMempoolMessage::Get(max, sender);
         
-        // THAY ĐỔI
         match self.mempool_channel.try_send(message) {
             Ok(()) => receiver
                 .await
@@ -47,12 +50,10 @@ impl MempoolDriver {
         }
     }
 
-    //验证mempool是否已经收到了区块
-    pub async fn verify(&mut self, block: Block) -> ConsensusResult<bool> {
+    pub async fn verify(&mut self, block: Box<Block>) -> ConsensusResult<bool> {
         let (sender, receiver) = oneshot::channel();
         let message = ConsensusMempoolMessage::Verify(Box::new(block), sender);
 
-        // THAY ĐỔI
         if let Err(e) = self.mempool_channel.try_send(message) {
             match e {
                 TrySendError::Full(_) => panic!("[PANIC] Kênh từ Consensus đến Mempool đã đầy khi gọi Verify!"),
@@ -65,20 +66,34 @@ impl MempoolDriver {
             .expect("Failed to receive payload status from mempool")
         {
             PayloadStatus::Accept => Ok(true),
-            PayloadStatus::Reject => Err(ConsensusError::InvalidPayload),
             PayloadStatus::Wait => Ok(false),
+            PayloadStatus::Reject => Err(ConsensusError::InvalidPayload),
         }
     }
 
     pub async fn cleanup(&mut self, digest: Vec<Digest>, epoch: SeqNumber, height: SeqNumber) {
         let message = ConsensusMempoolMessage::Cleanup(digest, epoch, height);
         
-        // THAY ĐỔI
         if let Err(e) = self.mempool_channel.try_send(message) {
             match e {
                 TrySendError::Full(_) => panic!("[PANIC] Kênh từ Consensus đến Mempool đã đầy khi gọi Cleanup!"),
                 TrySendError::Closed(_) => panic!("[PANIC] Kênh từ Consensus đến Mempool đã bị đóng!"),
             }
         }
+    }
+
+    // THÊM PHƯƠNG THỨC MỚI NÀY
+    pub async fn get_full_transactions(&mut self, digests: Vec<Digest>) -> ConsensusResult<Vec<Vec<u8>>> {
+        let (sender, receiver) = oneshot::channel();
+        let message = ConsensusMempoolMessage::GetFullTransactions(digests, sender);
+        
+        if let Err(e) = self.mempool_channel.try_send(message) {
+            match e {
+                TrySendError::Full(_) => panic!("[PANIC] Kênh từ Consensus đến Mempool đã đầy khi gọi GetFullTransactions!"),
+                TrySendError::Closed(_) => panic!("[PANIC] Kênh từ Consensus đến Mempool đã bị đóng!"),
+            }
+        }
+        
+        Ok(receiver.await.expect("Failed to receive full transactions from mempool"))
     }
 }
