@@ -218,6 +218,7 @@ impl Core {
             self.queue.remove(x);
             self.store.delete(x.to_vec()).await;
         }
+        info!("Cleanup: Hoàn thành dọn dẹp (epoch: {}, height: {}). Đã xóa {} digests.", epoch, height, digests.len());
     }
 
     pub async fn run(&mut self) {
