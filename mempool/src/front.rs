@@ -43,16 +43,19 @@ impl Front {
 
     async fn spawn_worker(socket: TcpStream, peer: SocketAddr, deliver: Sender<Transaction>) {
         tokio::spawn(async move {
-            let mut transport = Framed::new(socket, LengthDelimitedCodec::new());
+            // Sử dụng builder để tăng giới hạn kích thước khung
+            let codec = LengthDelimitedCodec::builder()
+                .max_frame_length(100_000_000)
+                .new_codec();
+            let mut transport = Framed::new(socket, codec);
+            
             while let Some(frame) = transport.next().await {
                 match frame {
                     Ok(x) => {
-                        // THAY ĐỔI
                         if let Err(e) = deliver.try_send(x.to_vec()) {
                             match e {
                                 TrySendError::Full(_) => {
                                     warn!("[BACK-PRESSURE] Kênh deliver từ Front đến PayloadRunner đã đầy. Từ chối giao dịch từ {}.", peer);
-                                    // Đóng kết nối để báo cho client biết rằng node đang bị quá tải.
                                     return;
                                 },
                                 TrySendError::Closed(_) => {
