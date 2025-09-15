@@ -3,7 +3,7 @@
 use crate::config::Export as _;
 use crate::config::{Committee, Parameters, Secret};
 use consensus::{Block, Consensus, ConsensusError, Protocol, SeqNumber};
-use crypto::{Digest, SignatureService};
+use crypto::{SignatureService};
 use log::{error, info, warn};
 use mempool::{Mempool, MempoolError};
 use serde::Serialize;
