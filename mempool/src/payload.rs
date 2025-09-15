@@ -67,15 +67,9 @@ impl Runner {
         loop {
             tokio::select! {
                 Some(transaction) = self.client_channel.recv() => {
-                    if let Some(payload) = self.add(transaction).await {
-                        let message = MempoolMessage::OwnPayload(payload);
-                        if let Err(e) = self.core_channel.send(message).await {
-                            panic!("Failed to send payload to the core: {}", e);
-                        }
-
-                        // Wait for the minimum block delay.
-                        sleep(Duration::from_millis(self.min_block_delay)).await;
-                    }
+                    self.transactions.push(transaction);
+                    self.size = self.transactions.iter().map(|x| x.len()).sum();
+                    // Bỏ qua kiểm tra kích thước và độ trễ ở đây. Payload sẽ chỉ được tạo khi có yêu cầu từ Consensus.
                 },
                 Some(sender) = self.request_channel.recv() => {
                     let _ = sender.send(self.make().await);
@@ -118,17 +112,13 @@ impl PayloadMaker {
         }
     }
 
-    pub async fn make(&mut self) -> Option<Payload> {
-        let (sender, receiver) = oneshot::channel();
-        if let Err(e) = self.request_channel.send(sender).await {
-            panic!("Failed to request payload from the inner runner: {}", e);
-        }
-        let payload = receiver
-            .await
-            .expect("Failed to receive payload from the inner runner");
-        match payload.size() {
-            0 => None,
-            _ => Some(payload),
-        }
+    async fn make(&mut self) -> Payload {
+        let transactions = self.transactions.drain(..).collect();
+
+        // Cleanup state.
+        self.size = 0;
+
+        // Make a payload.
+        Payload::new(transactions, self.name, self.signature_service.clone()).await
     }
 }
