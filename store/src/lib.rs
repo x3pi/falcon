@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use tokio::sync::mpsc::{channel, Sender}; //高性能无锁队列 Sender (可以写入信道) Receiver (读取信道)
+use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::oneshot;
 
 #[cfg(test)]
@@ -12,11 +12,12 @@ type StoreResult<T> = Result<T, StoreError>;
 type Key = Vec<u8>;
 type Value = Vec<u8>;
 
-//命令类型
+// Thêm lệnh Delete
 pub enum StoreCommand {
     Write(Key, Value),
     Read(Key, oneshot::Sender<StoreResult<Option<Value>>>),
     NotifyRead(Key, oneshot::Sender<StoreResult<Value>>),
+    Delete(Key), // Lệnh mới để xóa
 }
 
 #[derive(Clone)]
@@ -26,16 +27,14 @@ pub struct Store {
 
 impl Store {
     pub fn new(path: &str) -> StoreResult<Self> {
-        let db = rocksdb::DB::open_default(path)?; //key-value 数据库
+        let db = rocksdb::DB::open_default(path)?;
         let mut obligations = HashMap::<_, VecDeque<oneshot::Sender<_>>>::new();
         let (tx, mut rx) = channel(100);
         tokio::spawn(async move {
-            //启动一个异步线程
             while let Some(command) = rx.recv().await {
                 match command {
                     StoreCommand::Write(key, value) => {
                         let _ = db.put(&key, &value);
-                        //维护请求读队列
                         if let Some(mut senders) = obligations.remove(&key) {
                             while let Some(s) = senders.pop_front() {
                                 let _ = s.send(Ok(value.clone()));
@@ -53,11 +52,14 @@ impl Store {
                                 .entry(key)
                                 .or_insert_with(VecDeque::new)
                                 .push_back(sender),
-                            //如果没有则放入等待队列中
                             _ => {
                                 let _ = sender.send(response.map(|x| x.unwrap()));
                             }
                         }
+                    }
+                    // Thêm xử lý cho lệnh Delete
+                    StoreCommand::Delete(key) => {
+                        let _ = db.delete(&key);
                     }
                 }
             }
@@ -93,5 +95,12 @@ impl Store {
         receiver
             .await
             .expect("Failed to receive reply to NotifyRead command from store")
+    }
+    
+    // Thêm phương thức delete mới
+    pub async fn delete(&mut self, key: Key) {
+        if let Err(e) = self.channel.send(StoreCommand::Delete(key)).await {
+            panic!("Failed to send Delete command to store: {}", e);
+        }
     }
 }
