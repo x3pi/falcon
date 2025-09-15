@@ -3,7 +3,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/meta-node-blockchain/meta-node/pkg/bls"
-	p_common "github.com/meta-node-blockchain/meta-node/pkg/common"
 	"github.com/meta-node-blockchain/meta-node/pkg/network"
 	t_network "github.com/meta-node-blockchain/meta-node/types/network"
 )
@@ -109,15 +107,15 @@ func handleTxConnection(conn net.Conn) {
 				numTxs, data.Epoch, data.Height)
 
 			// Gửi từng giao dịch tới node đích
-			for i, tx := range data.Transactions {
-				sendErr := messageSender.SendBytes(nodeConnection, p_common.TransactionsFromSubTopic, tx)
-				if sendErr != nil {
-					fmt.Printf("Lỗi khi gửi giao dịch: %v\n", sendErr)
-				}
-				if i < 2 {
-					fmt.Printf("  - TX %d: %s\n", i+1, base64.StdEncoding.EncodeToString(tx))
-				}
-			}
+			// for i, tx := range data.Transactions {
+			// 	sendErr := messageSender.SendBytes(nodeConnection, p_common.TransactionsFromSubTopic, tx)
+			// 	if sendErr != nil {
+			// 		fmt.Printf("Lỗi khi gửi giao dịch: %v\n", sendErr)
+			// 	}
+			// 	if i < 2 {
+			// 		fmt.Printf("  - TX %d: %s\n", i+1, base64.StdEncoding.EncodeToString(tx))
+			// 	}
+			// }
 		}
 	}
 }
