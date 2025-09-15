@@ -10,7 +10,7 @@ use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
 #[cfg(feature = "benchmark")]
 use log::info;
-use log::{error, warn};
+use log::{error,info, warn};
 use network::NetMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
