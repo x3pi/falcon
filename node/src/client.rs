@@ -105,7 +105,10 @@ impl Client {
         let mut tx = BytesMut::with_capacity(self.size);
         let mut counter = 0;
         let mut r = rand::thread_rng().gen();
-        let mut transport = Framed::new(stream, LengthDelimitedCodec::new());
+        let codec = LengthDelimitedCodec::builder() // Sử dụng LengthDelimitedCodec::builder()
+        .max_frame_length(100_000_000) // Tăng giới hạn lên 100 MB hoặc hơn
+        .new_codec();
+        let mut transport = Framed::new(stream, codec);
         let interval = interval(Duration::from_millis(BURST_DURATION));
         tokio::pin!(interval);
 

@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package remote_storage;
+
+option go_package = "/proto"; // As per your provided file
+option java_package = "com.meta_node.protos.compiled.messages"; // As per your provided file
+
+// Messages for Remote Storage operations
+
+// Get Operation
+message StorageGetRequest {
+  bytes key = 1;
+}
+
+message StorageGetResponse {
+  bytes value = 1;
+  string error = 2; // Error field, empty if successful
+}
+
+// Put Operation
+message StoragePutRequest {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+message StoragePutResponse {
+  string error = 1; // Error field, empty if successful
+}
+
+// Delete Operation
+message StorageDeleteRequest {
+  bytes key = 1;
+}
+
+message StorageDeleteResponse {
+  string error = 1; // Error field, empty if successful
+}
+
+// BatchPut Operation
+message KeyValuePair {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+message StorageBatchPutRequest {
+  repeated KeyValuePair kvs = 1;
+}
+
+message StorageBatchPutResponse {
+  string error = 1; // Error field, empty if successful
+}
+
+// BatchDelete Operation
+message StorageBatchDeleteRequest {
+  repeated bytes keys = 1;
+}
+
+message StorageBatchDeleteResponse {
+  string error = 1; // Error field, empty if successful
+}
+
+// GetBackupPath Operation
+message StorageGetBackupPathRequest {
+  // No fields for this request based on your Go code
+}
+
+message StorageGetBackupPathResponse {
+  string path = 1;
+  string error = 2; // Error field, empty if successful
+}
+
+// Common DB Operation Message Wrappers
+
+// Enum to define the database operation type
+enum OperationType {
+  UNDEFINED_OP = 0; // Default value, should not be used
+  GET = 1;
+  PUT = 2;
+  DELETE = 3;
+  BATCH_PUT = 4;
+  BATCH_DELETE = 5;
+  GET_BACKUP_PATH = 6;
+}
+
+// Wrapper for all DB requests
+message DatabaseOperationRequest {
+  OperationType operation_type = 1; // Operation type
+  string request_id = 2;            // ID of this request (optional, useful for tracking)
+
+  oneof payload {
+    StorageGetRequest get_request = 3;
+    StoragePutRequest put_request = 4;
+    StorageDeleteRequest delete_request = 5;
+    StorageBatchPutRequest batch_put_request = 6;
+    StorageBatchDeleteRequest batch_delete_request = 7;
+    StorageGetBackupPathRequest get_backup_path_request = 8;
+  }
+}
+
+// Wrapper for all DB responses
+message DatabaseOperationResponse {
+  OperationType original_operation_type = 1; // Original operation type this response is for
+  string request_id = 2;                     // ID of the original request (for client to map response to request)
+  string error = 3;                          // General error field for the entire operation, or error at the wrapper level.
+                                             // If empty, check for error in the specific payload.
+  oneof payload {
+    StorageGetResponse get_response = 4;
+    StoragePutResponse put_response = 5;
+    StorageDeleteResponse delete_response = 6;
+    StorageBatchPutResponse batch_put_response = 7;
+    StorageBatchDeleteResponse batch_delete_response = 8;
+    StorageGetBackupPathResponse get_backup_path_response = 9;
+  }
+}

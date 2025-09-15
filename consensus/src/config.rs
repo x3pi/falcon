@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 
 pub type Stake = u32;
 pub type EpochNumber = u128;
+pub type SeqNumber = u64; // Dòng này có thể đã có trong consensus/src/core.rs, đảm bảo bạn có import nó
 
 #[derive(Serialize, Deserialize)]
 pub enum Protocol {
@@ -17,6 +18,11 @@ impl Default for Protocol {
     fn default() -> Self {
         Protocol::FlexHBBFT
     }
+}
+
+
+fn default_pruning_threshold() -> SeqNumber {
+    1000
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -33,6 +39,8 @@ pub struct Parameters {
     pub fault: u64,
     pub exp: u64,
     pub fallback: u64,
+    #[serde(default = "default_pruning_threshold")]
+    pub pruning_threshold: SeqNumber, // THÊM DÒNG NÀY
 }
 
 impl Default for Parameters {
@@ -42,14 +50,17 @@ impl Default for Parameters {
             timeout_delay: 5000,
             sync_retry_delay: 10_000,
             min_block_delay: 100,
-            network_delay: 100,
-            max_payload_size: 500,
+            network_delay: 200,
+            max_payload_size: 500_000,
             ddos: false,
             random_ddos: false,
             random_chance: 0,
             fault: 0,
             exp: 1,
             fallback: 1,
+            pruning_threshold: default_pruning_threshold(),
+
+            
         }
     }
 }

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::config::{Committee, Parameters, Protocol};
 use crate::core::{ConsensusMessage, Core};
 use crate::error::ConsensusResult;
@@ -7,16 +5,15 @@ use crate::filter::Filter;
 use crate::mempool::{ConsensusMempoolMessage, MempoolDriver};
 use crate::messages::Block;
 use crate::synchronizer::Synchronizer;
-use crypto::{PublicKey, SignatureService};
+use crate::core::SeqNumber;
+use crypto::{ PublicKey, SignatureService};
+use futures::future::join_all;
 use log::info;
 use network::{NetReceiver, NetSender};
 use store::Store;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-// use tokio::time::{Duration, sleep};
-use futures::future::join_all;
-use threshold_crypto::PublicKeySet;
 use tokio::net::TcpStream;
-use tokio::time::sleep;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::time::{sleep, Duration};
 
 #[cfg(test)]
 #[path = "tests/consensus_tests.rs"]
@@ -32,11 +29,11 @@ impl Consensus {
         parameters: Parameters,
         store: Store,
         signature_service: SignatureService,
-        pk_set: PublicKeySet, // The set of tss public keys
         tx_core: Sender<ConsensusMessage>,
         rx_core: Receiver<ConsensusMessage>,
         tx_consensus_mempool: Sender<ConsensusMempoolMessage>,
         tx_commit: Sender<Block>,
+        tx_commit_notification: Sender<(Vec<Vec<u8>>, SeqNumber, SeqNumber)>, // ĐÃ SỬA: Kiểu dữ liệu kênh
         protocol: Protocol,
     ) -> ConsensusResult<()> {
         info!(
@@ -113,20 +110,19 @@ impl Consensus {
                     committee,
                     parameters,
                     signature_service,
-                    pk_set,
                     store,
                     mempool_driver,
                     synchronizer,
                     tx_core,
-                    /* core_channel */ rx_core,
-                    /* network_filter */ tx_filter,
-                    /* commit_channel */ tx_commit,
+                    rx_core,
+                    tx_filter,
+                    tx_commit,
+                    tx_commit_notification,
                 );
                 tokio::spawn(async move {
                     core.run().await;
                 });
             }
-
             _ => {
                 return Ok(());
             }

@@ -1,3 +1,5 @@
+// mempool/src/core.rs
+
 use crate::config::{Committee, Parameters};
 use crate::error::{MempoolError, MempoolResult};
 use crate::messages::Payload;
@@ -21,7 +23,16 @@ use tokio::sync::mpsc::{Receiver, Sender};
 #[path = "tests/core_tests.rs"]
 pub mod core_tests;
 
-#[derive(Deserialize, Serialize, Debug)]
+// Struct mới để đóng gói dữ liệu gửi sang Go
+// GIỮ NGUYÊN STRUCT NÀY
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CommittedTransactions {
+    pub epoch: SeqNumber,
+    pub height: SeqNumber,
+    pub transactions: Vec<Vec<u8>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum MempoolMessage {
     OwnPayload(Payload),
     Payload(Payload),
@@ -38,7 +49,7 @@ pub struct Core {
     core_channel: Receiver<MempoolMessage>,
     consensus_channel: Receiver<ConsensusMempoolMessage>,
     network_channel: Sender<NetMessage>,
-    queue: HashSet<Digest>,
+    queue: HashSet<Digest>
 }
 
 impl Core {
@@ -94,12 +105,10 @@ impl Core {
         digest: &Digest,
         payload: Payload,
     ) -> MempoolResult<()> {
-        // Drop the transaction if our mempool is full.
         ensure!(
             self.queue.len() < self.parameters.queue_capacity,
             MempoolError::MempoolFull
         );
-
         #[cfg(feature = "benchmark")]
         // NOTE: This log entry is used to compute performance.
         info!("Payload {:?} contains {} B", digest, payload.size());
@@ -120,53 +129,32 @@ impl Core {
             }
         }
 
-        // Store the payload.
-        self.store_payload(digest.to_vec(), &payload).await;
 
-        // Share the payload with all other nodes.
-        let message = MempoolMessage::Payload(payload); //向其他节点发送这个payload
+        self.store_payload(digest.to_vec(), &payload).await;
+        let message = MempoolMessage::Payload(payload);
         self.transmit(&message, None).await
     }
 
     async fn handle_own_payload(&mut self, payload: Payload) -> MempoolResult<()> {
-        // Drop the transaction if our mempool is full.
-        ensure!(
-            self.queue.len() < self.parameters.queue_capacity,
-            MempoolError::MempoolFull
-        );
-
-        // Otherwise, try to add the transaction to the next payload
-        // we will add to the queue.
         let digest = payload.digest();
-        self.process_own_payload(&digest, payload).await?; //payload存入queue中
+        self.process_own_payload(&digest, payload).await?;
         self.queue.insert(digest);
         Ok(())
     }
 
     async fn handle_others_payload(&mut self, payload: Payload) -> MempoolResult<()> {
-        // Ensure the author of the payload is in the committee.
         let author = payload.author;
         ensure!(
             self.committee.exists(&author),
             MempoolError::UnknownAuthority(author)
         );
-
-        // Verify that the payload does not exceed the maximum size.
         ensure!(
             payload.size() <= self.parameters.max_payload_size,
             MempoolError::PayloadTooBig
         );
-
-        // Verify that the payload is correctly signed.
         let digest = payload.digest();
         payload.signature.verify(&digest, &author)?;
-
-        // Store payload.
-        // TODO [issue #18]: A bad node may make us store a lot of junk. There is no
-        // limit to how many payloads they can send us, and we will store them all.
         self.store_payload(digest.to_vec(), &payload).await;
-
-        // Add the payload to the queue.
         self.queue.insert(digest);
         Ok(())
     }
@@ -197,9 +185,9 @@ impl Core {
             }
         } else {
             let digest_len = Digest::default().size();
-            let digests = self.queue.iter().take(max / digest_len).cloned().collect();
+            let digests: Vec<_> = self.queue.iter().take(max / digest_len).cloned().collect();
             for x in &digests {
-                self.queue.remove(x); //去重
+                self.queue.remove(x);
             }
             Ok(digests)
         }
@@ -210,9 +198,25 @@ impl Core {
     }
 
     async fn cleanup(&mut self, digests: Vec<Digest>, epoch: SeqNumber, height: SeqNumber) {
+        let mut all_transactions = Vec::new();
+
+        // 1. Luôn thu thập giao dịch từ các payload (nếu có)
+        // Vòng lặp này sẽ tạo ra một `all_transactions` rỗng nếu không có giao dịch nào
+        if !digests.is_empty() {
+            for digest in &digests {
+                if let Ok(Some(payload_bytes)) = self.store.read(digest.to_vec()).await {
+                    if let Ok(payload) = bincode::deserialize::<Payload>(&payload_bytes) {
+                        all_transactions.extend(payload.transactions);
+                    }
+                }
+            }
+        }
+        
+        // 4. Logic dọn dẹp ban đầu luôn được thực hiện
         self.synchronizer.cleanup(epoch, height).await;
         for x in &digests {
             self.queue.remove(x);
+            self.store.delete(x.to_vec()).await;
         }
     }
 
@@ -228,20 +232,20 @@ impl Core {
             let result = tokio::select! {
                 Some(message) = self.core_channel.recv() => {
                     match message {
-                        MempoolMessage::OwnPayload(payload) => self.handle_own_payload(payload).await, //处理本地生成的PayLoad,并向其他节点发送payload
-                        MempoolMessage::Payload(payload) => self.handle_others_payload(payload).await,  //将其他人发送过来的payload存入本地
-                        MempoolMessage::PayloadRequest(digest, sender) => self.handle_request(digest, sender).await,    //返回digest对应的payload
+                        MempoolMessage::OwnPayload(payload) => self.handle_own_payload(payload).await,
+                        MempoolMessage::Payload(payload) => self.handle_others_payload(payload).await,
+                        MempoolMessage::PayloadRequest(digest, sender) => self.handle_request(digest, sender).await,
                     }
                 },
-                Some(message) = self.consensus_channel.recv() => {//处理共识发送的Payload请求
+                Some(message) = self.consensus_channel.recv() => {
                     match message {
                         ConsensusMempoolMessage::Get(max, sender) => {
                             let result = self.get_payload(max).await;
                             log(result.as_ref().map(|_| &()));
                             let _ = sender.send(result.unwrap_or_default());
                         },
-                        ConsensusMempoolMessage::Verify(block, sender) => {//验证区块中所包含的payload是否在本地都有
-                            let result = self.verify_payload(block).await;//如果没有，则向其他节点发送request
+                        ConsensusMempoolMessage::Verify(block, sender) => {
+                            let result = self.verify_payload(block).await;
                             log(result.as_ref().map(|_| &()));
                             let status = match result {
                                 Ok(true) => PayloadStatus::Accept,
@@ -250,7 +254,18 @@ impl Core {
                             };
                             let _ = sender.send(status);
                         },
-                        ConsensusMempoolMessage::Cleanup(digests,epoch,height) => self.cleanup(digests,epoch,height).await,//
+                        ConsensusMempoolMessage::Cleanup(digests, epoch, height) => self.cleanup(digests, epoch, height).await,
+                        ConsensusMempoolMessage::GetFullTransactions(digests, sender) => { // THÊM NHÁNH MỚI
+                            let mut all_transactions = Vec::new();
+                            for digest in &digests {
+                                if let Ok(Some(payload_bytes)) = self.store.read(digest.to_vec()).await {
+                                    if let Ok(payload) = bincode::deserialize::<Payload>(&payload_bytes) {
+                                        all_transactions.extend(payload.transactions);
+                                    }
+                                }
+                            }
+                            let _ = sender.send(all_transactions);
+                        },
                     }
                     Ok(())
                 },

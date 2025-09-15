@@ -1,7 +1,11 @@
+// mempool/src/mempool.rs
+
 use crate::config::{Committee, Parameters};
+// THÊM DÒNG NÀY
 use crate::core::Core;
 use crate::error::MempoolResult;
 use crate::front::Front;
+// THÊM DÒNG NÀY
 use crate::payload::PayloadMaker;
 use crate::synchronizer::Synchronizer;
 use consensus::{ConsensusMempoolMessage, ConsensusMessage};
@@ -43,6 +47,7 @@ impl Mempool {
         let (tx_network, rx_network) = channel(10000);
         let (tx_core, rx_core) = channel(10000);
         let (tx_client, rx_client) = channel(10000);
+        
 
         // Run the front end that receives client transactions.
         let address = committee.front_address(&name).map(|mut x| {
@@ -104,6 +109,9 @@ impl Mempool {
             /* core_channel */ rx_core,
             consensus_mempool_channel,
             /* network_channel */ tx_network,
+            // ---- BẮT ĐẦU THAY ĐỔI ----
+            // 3. Truyền tx_go_sender vào Core.
+            // ---- KẾT THÚC THAY ĐỔI ----
         );
 
         tokio::spawn(async move {

@@ -15,9 +15,9 @@ pub struct Parameters {
 impl Default for Parameters {
     fn default() -> Self {
         Self {
-            queue_capacity: 10_000,
+            queue_capacity: 50_000_000,
             sync_retry_delay: 10_000,
-            max_payload_size: 100_000,
+            max_payload_size: 500_000,
             min_block_delay: 100,
         }
     }

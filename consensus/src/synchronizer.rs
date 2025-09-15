@@ -1,6 +1,7 @@
 use crate::config::Committee;
 use crate::core::{ConsensusMessage, Core};
 use crate::error::ConsensusResult;
+use crate::ConsensusError;
 use crate::filter::FilterInput;
 use crate::{Block, SeqNumber};
 use crypto::PublicKey;
@@ -12,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{sleep, Duration, Instant};
+use tokio::sync::mpsc::error::TrySendError; // Thêm dòng này vào đầu file
 
 #[cfg(test)]
 #[path = "tests/synchronizer_tests.rs"]
@@ -30,12 +32,17 @@ impl Synchronizer {
         committee: Committee,
         store: Store,
         network_filter: Sender<FilterInput>,
-        _core_channel: Sender<ConsensusMessage>,
+        core_channel: Sender<ConsensusMessage>,
         sync_retry_delay: u64,
     ) -> Self {
         let (tx_inner, mut rx_inner): (_, Receiver<(SeqNumber, SeqNumber)>) = channel(10000);
 
         let store_copy = store.clone();
+        
+        // --- BƯỚC 1: TẠO BẢN SAO CỦA KÊNH ---
+        // Clone `core_channel` để có thể di chuyển bản sao vào trong tokio::spawn
+        let core_channel_clone = core_channel.clone(); 
+        
         tokio::spawn(async move {
             let mut waiting = FuturesUnordered::new();
             let mut pending = HashSet::new();
@@ -47,8 +54,7 @@ impl Synchronizer {
                 tokio::select! {
                     Some((epoch,height)) = rx_inner.recv() => {
                         if pending.insert((epoch,height)) {
-
-                            let fut = Self::waiter(store_copy.clone(),epoch,height,&committee);
+                            let fut = Self::waiter(store_copy.clone(), epoch, height, &committee);
                             waiting.push(fut);
 
                             if !requests.contains_key(&(epoch,height)){
@@ -64,19 +70,28 @@ impl Synchronizer {
                         }
                     },
                     Some(result) = waiting.next() => match result {
-                        Ok((epoch,height)) => {
-                            debug!("consensus sync loopback");
-                            let _ = pending.remove(&(epoch,height));
-                            let _ = requests.remove(&(epoch,height));/////////////////?
-                            // let message = ConsensusMessage::LoopBackMsg(epoch,height);
-                            // if let Err(e) = core_channel.send(message).await {
-                            //     panic!("Failed to send message through core channel: {}", e);
-                            // }
+                        Ok(block) => {
+                            debug!("Consensus sync loopback for block epoch {}, height {}", block.epoch, block.height);
+                            let _ = pending.remove(&(block.epoch, block.height));
+                            let _ = requests.remove(&(block.epoch, block.height));
+                            
+                            let message = ConsensusMessage::LoopBackMsg(block);
+                            
+                            // --- BƯỚC 2: SỬ DỤNG BẢN SAO ---
+                            // Sử dụng `core_channel_clone` ở đây
+                            match core_channel_clone.try_send(message) {
+                                Ok(()) => (),
+                                Err(TrySendError::Full(_)) => {
+                                    panic!("[PANIC] Kênh Loopback từ Synchronizer đến Core đã đầy! Core đang bị quá tải hoặc bế tắc.");
+                                },
+                                Err(TrySendError::Closed(_)) => {
+                                    panic!("[PANIC] Kênh Loopback từ Synchronizer đến Core đã bị đóng!");
+                                }
+                            }
                         },
                         Err(e) => error!("{}", e)
                     },
                     () = &mut timer => {
-                        // This implements the 'perfect point to point link' abstraction.
                         for ((epoch,height), timestamp) in &requests {
                             let now = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
@@ -84,7 +99,7 @@ impl Synchronizer {
                                 .as_millis();
                             if timestamp + (sync_retry_delay as u128) < now {
                                 debug!("Requesting sync for block epoch {}, height {}", epoch,height);
-                                let message = ConsensusMessage::SyncRequestMsg(*epoch,*height, name);///////////////?
+                                let message = ConsensusMessage::SyncRequestMsg(*epoch,*height, name);
                                 Self::transmit(message, &name, None, &network_filter, &committee).await.unwrap();
                             }
                         }
@@ -105,10 +120,19 @@ impl Synchronizer {
         epoch: SeqNumber,
         height: SeqNumber,
         committee: &Committee,
-    ) -> ConsensusResult<(SeqNumber, SeqNumber)> {
+    ) -> ConsensusResult<Block> { // <--- THAY ĐỔI 1: Kiểu trả về là Block
         let key = Core::rank(epoch, height, committee);
-        let _ = store.notify_read(key.to_le_bytes().into()).await?;
-        Ok((epoch, height))
+        let key_bytes: Vec<u8> = key.to_le_bytes().into();
+    
+        // Chờ cho đến khi store có dữ liệu tại key này
+        let _ = store.notify_read(key_bytes.clone()).await?;
+    
+        // Đọc và deserialize khối
+        let block_bytes = store.read(key_bytes).await?
+            .ok_or_else(|| ConsensusError::SerializedBlockNotFound(epoch, height))?;
+            
+        let block = bincode::deserialize(&block_bytes)?;
+        Ok(block) // <--- THAY ĐỔI 2: Trả về khối đã đọc được
     }
 
     pub async fn transmit(
