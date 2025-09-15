@@ -52,7 +52,7 @@ impl MempoolDriver {
 
     pub async fn verify(&mut self, block: Box<Block>) -> ConsensusResult<bool> {
         let (sender, receiver) = oneshot::channel();
-        let message = ConsensusMempoolMessage::Verify(Box::new(block), sender);
+        let message = ConsensusMempoolMessage::Verify(block, sender);
 
         if let Err(e) = self.mempool_channel.try_send(message) {
             match e {

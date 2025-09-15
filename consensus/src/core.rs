@@ -289,7 +289,7 @@ impl Core {
         );
         block.verify(&self.committee)?;
         if self.parameters.exp > 0 {
-            if !self.mempool_driver.verify(block.clone()).await? {
+            if !self.mempool_driver.verify(Box::new(block.clone())).await? {
                 return Ok(());
             }
         }

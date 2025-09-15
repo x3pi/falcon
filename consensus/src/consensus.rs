@@ -33,7 +33,7 @@ impl Consensus {
         rx_core: Receiver<ConsensusMessage>,
         tx_consensus_mempool: Sender<ConsensusMempoolMessage>,
         tx_commit: Sender<Block>,
-        tx_commit_notification: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
+        tx_commit_notification: Sender<(Vec<Vec<u8>>, SeqNumber, SeqNumber)>, // ĐÃ SỬA: Kiểu dữ liệu kênh
         protocol: Protocol,
     ) -> ConsensusResult<()> {
         info!(
