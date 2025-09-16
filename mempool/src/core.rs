@@ -8,8 +8,8 @@ use crate::synchronizer::Synchronizer;
 use consensus::{Block, ConsensusMempoolMessage, PayloadStatus, SeqNumber};
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
-#[cfg(feature = "benchmark")]
-use log::info;
+// #[cfg(feature = "benchmark")]
+// use log::info;
 use log::{error, info, warn};
 use network::NetMessage;
 use serde::{Deserialize, Serialize};
