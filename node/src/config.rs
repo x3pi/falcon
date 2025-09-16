@@ -1,9 +1,8 @@
 use crate::node::NodeError;
 use consensus::{Committee as ConsensusCommittee, Parameters as ConsensusParameters};
-use crypto::{generate_keypair, generate_production_keypair, PublicKey, SecretKey, SecretShare};
+use crypto::{generate_keypair, generate_production_keypair, PublicKey, SecretKey};
 use mempool::{Committee as MempoolCommittee, Parameters as MempoolParameters};
-use rand::rngs::StdRng;
-use rand::SeedableRng as _;
+
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -66,13 +65,11 @@ impl Export for Secret {}
 
 impl Default for Secret {
     fn default() -> Self {
-        let mut rng = StdRng::from_seed([0; 32]);
-        let (name, secret) = generate_keypair(&mut rng);
+        let (name, secret) = generate_keypair();
         Self { name, secret }
     }
 }
 
-impl Export for SecretShare {}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Committee {

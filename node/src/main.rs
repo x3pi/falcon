@@ -65,19 +65,12 @@ async fn main() {
                 error!("{}", e);
             }
         }
-        ("threshold_keys", Some(subm)) => {
-            let filenames: Vec<&str> = subm.values_of("filename").unwrap().collect();
-            if let Err(e) = Node::print_threshold_key_file(filenames) {
-                error!("{}", e);
-            }
-        }
         ("run", Some(subm)) => {
             let key_file = subm.value_of("keys").unwrap();
-            let threshold_key_file = subm.value_of("threshold_keys").unwrap();
             let committee_file = subm.value_of("committee").unwrap();
             let parameters_file = subm.value_of("parameters");
             let store_path = subm.value_of("store").unwrap();
-            match Node::new(committee_file, key_file, threshold_key_file, store_path, parameters_file).await {
+            match Node::new(committee_file, key_file, store_path, parameters_file).await {
                 Ok(mut node) => {
                     tokio::spawn(async move {
                         node.analyze_block().await;
@@ -153,7 +146,7 @@ fn deploy_testbed(nodes: usize) -> Result<Vec<JoinHandle<()>>, Box<dyn std::erro
             let _ = fs::remove_dir_all(&store_path);
 
             Ok(tokio::spawn(async move {
-                match Node::new(committee_file, &key_file, &key_file, &store_path, None).await { // daniel: not implemented for tss yet
+                match Node::new(committee_file, &key_file, &store_path, None).await {
                     Ok(mut node) => {
                         // Sink the commit channel.
                         while node.commit.recv().await.is_some() {}

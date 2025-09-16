@@ -8,7 +8,6 @@ use ed25519_dalek::Sha512;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::fmt;
-use threshold_crypto::{PublicKeySet, SignatureShare};
 
 #[cfg(test)]
 #[path = "tests/messages_tests.rs"]
@@ -562,75 +561,5 @@ impl fmt::Debug for ABAOutput {
 /************************** ABA Struct ************************************/
 
 /************************** Share Coin Struct ************************************/
-#[derive(Clone, Serialize, Deserialize)]
-pub struct RandomnessShare {
-    pub epoch: SeqNumber,
-    pub height: SeqNumber,
-    pub round: SeqNumber,
-    pub author: PublicKey,
-    pub signature_share: SignatureShare,
-}
 
-impl RandomnessShare {
-    pub async fn new(
-        epoch: SeqNumber,
-        height: SeqNumber,
-        round: SeqNumber,
-        author: PublicKey,
-        mut signature_service: SignatureService,
-    ) -> Self {
-        let mut hasher = Sha512::new();
-        hasher.update(round.to_le_bytes());
-        hasher.update(height.to_le_bytes());
-        hasher.update(epoch.to_le_bytes());
-        let digest = Digest(hasher.finalize().as_slice()[..32].try_into().unwrap());
-        let signature_share = signature_service
-            .request_tss_signature(digest)
-            .await
-            .unwrap();
-        Self {
-            round,
-            height,
-            epoch,
-            author,
-            signature_share,
-        }
-    }
-
-    pub fn verify(&self, committee: &Committee, pk_set: &PublicKeySet) -> ConsensusResult<()> {
-        // Ensure the authority has voting rights.
-        ensure!(
-            committee.stake(&self.author) > 0,
-            ConsensusError::UnknownAuthority(self.author)
-        );
-        let tss_pk = pk_set.public_key_share(committee.id(self.author));
-        // Check the signature.
-        ensure!(
-            tss_pk.verify(&self.signature_share, &self.digest()),
-            ConsensusError::InvalidThresholdSignature(self.author)
-        );
-
-        Ok(())
-    }
-}
-
-impl Hash for RandomnessShare {
-    fn digest(&self) -> Digest {
-        let mut hasher = Sha512::new();
-        hasher.update(self.round.to_le_bytes());
-        hasher.update(self.height.to_le_bytes());
-        hasher.update(self.epoch.to_le_bytes());
-        Digest(hasher.finalize().as_slice()[..32].try_into().unwrap())
-    }
-}
-
-impl fmt::Debug for RandomnessShare {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(
-            f,
-            "RandomnessShare (author {}, height {},round {})",
-            self.author, self.height, self.round,
-        )
-    }
-}
 /************************** Share Coin Struct **************************/

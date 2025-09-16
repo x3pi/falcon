@@ -7,7 +7,7 @@ use crate::error::{ConsensusError, ConsensusResult};
 use crate::filter::FilterInput;
 use crate::mempool::MempoolDriver;
 use crate::messages::{
-    ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, RandomnessShare, ReadyVote,
+    ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, ReadyVote,
 };
 use crate::synchronizer::Synchronizer;
 use async_recursion::async_recursion;
@@ -15,7 +15,6 @@ use crypto::{Digest, PublicKey, SignatureService};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use store::Store;
-use threshold_crypto::PublicKeySet;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{sleep, Duration};
 #[cfg(test)]
@@ -44,7 +43,6 @@ pub enum ConsensusMessage {
     RBCReadyMsg(ReadyVote),
     ABAValMsg(ABAVal),
     ABAMuxMsg(ABAVal),
-    ABACoinShareMsg(RandomnessShare),
     ABAOutputMsg(ABAOutput),
     PrePareMsg(Prepare),
     LoopBackMsg(Block),
@@ -58,7 +56,6 @@ pub struct Core {
     parameters: Parameters,
     store: Store,
     signature_service: SignatureService,
-    pk_set: PublicKeySet,
     mempool_driver: MempoolDriver,
     synchronizer: Synchronizer,
     _tx_core: Sender<ConsensusMessage>,
@@ -91,7 +88,6 @@ impl Core {
         committee: Committee,
         parameters: Parameters,
         signature_service: SignatureService,
-        pk_set: PublicKeySet,
         store: Store,
         mempool_driver: MempoolDriver,
         synchronizer: Synchronizer,
@@ -111,7 +107,6 @@ impl Core {
             committee,
             parameters,
             signature_service,
-            pk_set,
             store,
             mempool_driver,
             synchronizer,
@@ -623,6 +618,38 @@ impl Core {
         Ok(())
     }
 
+    async fn process_common_coin(
+        &mut self,
+        epoch: SeqNumber,
+        height: SeqNumber,
+        round: SeqNumber,
+    ) -> ConsensusResult<()> {
+        debug!(
+            "processing common coin epoch {} height {} round {}",
+            epoch, height, round
+        );
+    
+        // Đặt giá trị mặc định cho coin là 1 (OPT).
+        let coin = OPT as usize;
+    
+        let mux_flags = self
+            .aba_mux_flags
+            .entry((epoch, height, round))
+            .or_insert([false, false]);
+    
+        let mut val = coin;
+        if mux_flags[coin] && !mux_flags[1 - coin] {
+            self.process_aba_output(epoch, height, round, coin)
+                .await?;
+        } else if !mux_flags[coin] && mux_flags[1 - coin] {
+            val = 1 - coin;
+        }
+        self.aba_adcance_round(epoch, height, round + 1, val)
+            .await?;
+    
+        Ok(())
+    }
+
     async fn handle_aba_mux(&mut self, aba_mux: &ABAVal) -> ConsensusResult<()> {
         debug!(
             "processing aba mux epoch {} height {}",
@@ -660,24 +687,7 @@ impl Core {
                 }
 
                 if mux_flags[PES as usize] || mux_flags[OPT as usize] {
-                    let share = RandomnessShare::new(
-                        aba_mux.epoch,
-                        aba_mux.height,
-                        aba_mux.round,
-                        self.name,
-                        self.signature_service.clone(),
-                    )
-                    .await;
-                    let message = ConsensusMessage::ABACoinShareMsg(share.clone());
-                    Synchronizer::transmit(
-                        message,
-                        &self.name,
-                        None,
-                        &self.network_filter,
-                        &self.committee,
-                    )
-                    .await?;
-                    self.handle_aba_share(&share).await?;
+                    self.process_common_coin(aba_mux.epoch, aba_mux.height, aba_mux.round).await?;
                 }
             }
         }
@@ -685,32 +695,6 @@ impl Core {
         Ok(())
     }
 
-    async fn handle_aba_share(&mut self, share: &RandomnessShare) -> ConsensusResult<()> {
-        debug!(
-            "processing coin share epoch {} height {} round {}",
-            share.epoch, share.height, share.round
-        );
-        share.verify(&self.committee, &self.pk_set)?;
-        if let Some(coin) = self
-            .aggregator
-            .add_aba_share_coin(share.clone(), &self.pk_set)?
-        {
-            let mux_flags = self
-                .aba_mux_flags
-                .entry((share.epoch, share.height, share.round))
-                .or_insert([false, false]);
-            let mut val = coin;
-            if mux_flags[coin] && !mux_flags[1 - coin] {
-                self.process_aba_output(share.epoch, share.height, share.round, coin)
-                    .await?;
-            } else if !mux_flags[coin] && mux_flags[1 - coin] {
-                val = 1 - coin;
-            }
-            self.aba_adcance_round(share.epoch, share.height, share.round + 1, val)
-                .await?;
-        }
-        Ok(())
-    }
 
     async fn handle_aba_output(&mut self, output: &ABAOutput) -> ConsensusResult<()> {
         debug!(
@@ -852,7 +836,6 @@ impl Core {
                         ConsensusMessage::RBCReadyMsg(rvote)=> self.handle_rbc_ready(&rvote).await,
                         ConsensusMessage::ABAValMsg(val)=>self.handle_aba_val(&val).await,
                         ConsensusMessage::ABAMuxMsg(mux)=> self.handle_aba_mux(&mux).await,
-                        ConsensusMessage::ABACoinShareMsg(share)=>self.handle_aba_share(&share).await,
                         ConsensusMessage::ABAOutputMsg(output)=>self.handle_aba_output(&output).await,
                         ConsensusMessage::PrePareMsg(prepare)=>self.handle_prepare(&prepare).await,
                         ConsensusMessage::LoopBackMsg(block) =>self.handle_rbc_val(&block).await,

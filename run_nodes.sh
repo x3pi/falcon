@@ -48,7 +48,7 @@ PARAMETERS_FILE="$BENCHMARK_DIR/.parameters.json"
 # ==============================================================================
 # --- Stage 0: Build ---
 cargo clean
-cargo build --release
+cargo build --release --features benchmark
 
 # --- Giai đoạn 1: Dọn dẹp và Kiểm tra ---
 echo "--- Stage 1: Cleanup and Preparation ---"

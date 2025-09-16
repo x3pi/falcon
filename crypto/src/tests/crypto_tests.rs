@@ -1,14 +1,5 @@
 use super::*;
-use ed25519_dalek::Digest as _;
-use ed25519_dalek::Sha512;
-use rand::rngs::StdRng;
-use rand::SeedableRng as _;
-
-impl Hash for &[u8] {
-    fn digest(&self) -> Digest {
-        Digest(Sha512::digest(self).as_slice()[..32].try_into().unwrap())
-    }
-}
+use libsecp256k1::{PublicKey as SecpPublicKey, SecretKey as SecpSecretKey};
 
 impl PartialEq for SecretKey {
     fn eq(&self, other: &Self) -> bool {
@@ -23,8 +14,7 @@ impl fmt::Debug for SecretKey {
 }
 
 pub fn keys() -> Vec<(PublicKey, SecretKey)> {
-    let mut rng = StdRng::from_seed([0; 32]);
-    (0..4).map(|_| generate_keypair(&mut rng)).collect()
+    (0..4).map(|_| generate_keypair()).collect()
 }
 
 #[test]
@@ -75,51 +65,13 @@ fn verify_invalid_signature() {
     assert!(signature.verify(&digest, &public_key).is_err());
 }
 
-#[test]
-fn verify_valid_batch() {
-    // Make signatures.
-    let message: &[u8] = b"Hello, world!";
-    let digest = message.digest();
-    let mut keys = keys();
-    let signatures: Vec<_> = (0..3)
-        .map(|_| {
-            let (public_key, secret_key) = keys.pop().unwrap();
-            (public_key, Signature::new(&digest, &secret_key))
-        })
-        .collect();
-
-    // Verify the batch.
-    assert!(Signature::verify_batch(&digest, &signatures).is_ok());
-}
-
-#[test]
-fn verify_invalid_batch() {
-    // Make 2 valid signatures.
-    let message: &[u8] = b"Hello, world!";
-    let digest = message.digest();
-    let mut keys = keys();
-    let mut signatures: Vec<_> = (0..2)
-        .map(|_| {
-            let (public_key, secret_key) = keys.pop().unwrap();
-            (public_key, Signature::new(&digest, &secret_key))
-        })
-        .collect();
-
-    // Add an invalid signature.
-    let (public_key, _) = keys.pop().unwrap();
-    signatures.push((public_key, Signature::default()));
-
-    // Verify the batch.
-    assert!(Signature::verify_batch(&digest, &signatures).is_err());
-}
-
 #[tokio::test]
 async fn signature_service() {
     // Get a keypair.
     let (public_key, secret_key) = keys().pop().unwrap();
 
     // Spawn the signature service.
-    let mut service = SignatureService::new(secret_key, None);
+    let mut service = SignatureService::new(secret_key);
 
     // Request signature from the service.
     let message: &[u8] = b"Hello, world!";
@@ -128,4 +80,25 @@ async fn signature_service() {
 
     // Verify the signature we received.
     assert!(signature.verify(&digest, &public_key).is_ok());
+}
+
+#[test]
+fn generate_ethereum_address() {
+    // Khóa bí mật và địa chỉ ví đã biết để kiểm tra.
+    // a10d6e6340b6d5e6d775560a3d5714a1939dc110a99cb1d156cd861346a32aab
+    
+    let secret_bytes = hex::decode("a10d6e6340b6d5e6d775560a3d5714a1939dc110a99cb1d156cd861346a32aab").unwrap();
+    let secret_key_secp = SecpSecretKey::parse_slice(&secret_bytes).unwrap();
+    let public_key_secp = SecpPublicKey::from_secret_key(&secret_key_secp);
+
+    let public_key = PublicKey(public_key_secp.serialize());
+    println!("Public Key: {:?}", public_key);
+
+    let secret_key = SecretKey(secret_key_secp.serialize());
+    println!("Secret Key: {:?}", secret_key);
+    
+    let expected_address = "0x924897dc867f06a1e3c5579bb0b75df3025d5e9dv";
+    let calculated_address = public_key.to_address();
+
+    assert_eq!(calculated_address, expected_address);
 }

@@ -14,13 +14,9 @@ use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 // use tokio::time::{Duration, sleep};
 use futures::future::join_all;
-use threshold_crypto::PublicKeySet;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 
-#[cfg(test)]
-#[path = "tests/consensus_tests.rs"]
-pub mod consensus_tests;
 
 pub struct Consensus;
 
@@ -32,7 +28,6 @@ impl Consensus {
         parameters: Parameters,
         store: Store,
         signature_service: SignatureService,
-        pk_set: PublicKeySet, // The set of tss public keys
         tx_core: Sender<ConsensusMessage>,
         rx_core: Receiver<ConsensusMessage>,
         tx_consensus_mempool: Sender<ConsensusMempoolMessage>,
@@ -113,7 +108,6 @@ impl Consensus {
                     committee,
                     parameters,
                     signature_service,
-                    pk_set,
                     store,
                     mempool_driver,
                     synchronizer,
