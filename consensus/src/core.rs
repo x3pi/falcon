@@ -13,7 +13,7 @@ use crypto::{Digest, PublicKey, SignatureService};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use store::Store;
-use tokio::sync::mpsc::{channel, error::TrySendError, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{sleep, Duration, Instant};
 
 #[cfg(test)]
