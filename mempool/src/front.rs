@@ -40,7 +40,11 @@ impl Front {
 
     async fn spawn_worker(socket: TcpStream, peer: SocketAddr, deliver: Sender<Transaction>) {
         tokio::spawn(async move {
-            let mut transport = Framed::new(socket, LengthDelimitedCodec::new());
+            const MAX_FRAME_SIZE: usize = 250 * 1024 * 1024; // Đặt giới hạn là 25MB, lớn hơn 20MB
+
+            let mut codec = LengthDelimitedCodec::new();
+            codec.set_max_frame_length(MAX_FRAME_SIZE);
+            let mut transport = Framed::new(socket, codec);
             while let Some(frame) = transport.next().await {
                 match frame {
                     //接收客户端发送过来的消息 存入client——sender
