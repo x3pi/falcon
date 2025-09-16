@@ -73,6 +73,7 @@ pub struct Core {
     rbc_ready: HashSet<(SeqNumber, SeqNumber)>,
     rbc_epoch_outputs: HashMap<SeqNumber, HashSet<SeqNumber>>,
     prepare_flags: HashSet<(SeqNumber, SeqNumber)>,
+    prepare_voted_two: HashSet<(SeqNumber, SeqNumber)>,
     aba_values: HashMap<(SeqNumber, SeqNumber, SeqNumber), [HashSet<PublicKey>; 2]>,
     aba_values_flag: HashMap<(SeqNumber, SeqNumber, SeqNumber), [bool; 2]>,
     aba_mux_values: HashMap<(SeqNumber, SeqNumber, SeqNumber), [HashSet<PublicKey>; 2]>,
@@ -122,6 +123,7 @@ impl Core {
             rbc_ready: HashSet::new(),
             rbc_epoch_outputs: HashMap::new(),
             prepare_flags: HashSet::new(),
+            prepare_voted_two: HashSet::new(),
             aba_values: HashMap::new(),
             aba_mux_values: HashMap::new(),
             aba_values_flag: HashMap::new(),
@@ -490,25 +492,27 @@ impl Core {
                 }
             } else {
                 if prepare.phase == PRE_ONE {
-                    let pre2 = Prepare::new(
-                        self.name,
-                        prepare.epoch,
-                        prepare.height,
-                        PRE_TWO,
-                        val,
-                        self.signature_service.clone(),
-                    )
-                    .await;
-                    let message = ConsensusMessage::PrePareMsg(pre2.clone());
-                    Synchronizer::transmit(
-                        message,
-                        &self.name,
-                        None,
-                        &self.network_filter,
-                        &self.committee,
-                    )
-                    .await?;
-                    self.handle_prepare(&pre2).await?;
+                    if self.prepare_voted_two.insert((prepare.epoch, prepare.height)) {
+                        let pre2 = Prepare::new(
+                            self.name,
+                            prepare.epoch,
+                            prepare.height,
+                            PRE_TWO,
+                            val,
+                            self.signature_service.clone(),
+                        )
+                        .await;
+                        let message = ConsensusMessage::PrePareMsg(pre2.clone());
+                        Synchronizer::transmit(
+                            message,
+                            &self.name,
+                            None,
+                            &self.network_filter,
+                            &self.committee,
+                        )
+                        .await?;
+                        self.handle_prepare(&pre2).await?;
+                      }
                 } else if prepare.phase == PRE_TWO {
                     //发送ABA
                     let aba_val = ABAVal::new(
