@@ -12,3 +12,11 @@ Cargo.lock
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
+benchmark/.db-*/
+benchmark/db_*/
+benchmark/client
+benchmark/node
+benchmark/.node-*.json
+benchmark/.committee.json
+benchmark/.parameters.json
+aba_deadlocks.log
