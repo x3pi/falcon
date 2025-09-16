@@ -33,7 +33,6 @@ async fn main() {
             SubCommand::with_name("run")
                 .about("Runs a single node")
                 .args_from_usage("--keys=<FILE> 'The file containing the node keys'")
-                .args_from_usage("--threshold_keys=<FILE> 'The file containing the node threshold_keys'")
                 .args_from_usage("--committee=<FILE> 'The file containing committee information'")
                 .args_from_usage("--parameters=[FILE] 'The file containing the node parameters'")
                 .args_from_usage("--store=<PATH> 'The path where to create the data store'"),
