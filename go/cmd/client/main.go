@@ -34,12 +34,12 @@ func main() {
 
 	// --- Gửi giao dịch 2 ---
 	// Sẽ tái sử dụng kết nối từ lần gửi trước.
-	log.Println("Đang gửi giao dịch #2...")
-	txData2 := createSampleTransaction(102, transactionSize)
-	if err := client.SendTransaction(txData2); err != nil {
-		log.Fatalf("Gửi giao dịch #2 thất bại: %v", err)
-	}
-	log.Println("Giao dịch #2 đã gửi thành công.")
+	// log.Println("Đang gửi giao dịch #2...")
+	// txData2 := createSampleTransaction(102, transactionSize)
+	// if err := client.SendTransaction(txData2); err != nil {
+	// 	log.Fatalf("Gửi giao dịch #2 thất bại: %v", err)
+	// }
+	// log.Println("Giao dịch #2 đã gửi thành công.")
 
 	// (Nếu máy chủ bị khởi động lại giữa giao dịch #1 và #2,
 	// client sẽ phát hiện lỗi ở giao dịch #2 và tự động kết nối lại.)
