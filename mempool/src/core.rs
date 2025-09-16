@@ -10,7 +10,7 @@ use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
 #[cfg(feature = "benchmark")]
 use log::info;
-use log::{error,info, warn};
+use log::{error, info, warn};
 use network::NetMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -49,7 +49,7 @@ pub struct Core {
     core_channel: Receiver<MempoolMessage>,
     consensus_channel: Receiver<ConsensusMempoolMessage>,
     network_channel: Sender<NetMessage>,
-    queue: HashSet<Digest>
+    queue: HashSet<Digest>,
 }
 
 impl Core {
@@ -128,7 +128,6 @@ impl Core {
                 }
             }
         }
-
 
         self.store_payload(digest.to_vec(), &payload).await;
         let message = MempoolMessage::Payload(payload);
@@ -211,14 +210,21 @@ impl Core {
                 }
             }
         }
-        
+
         // 4. Logic dọn dẹp ban đầu luôn được thực hiện
         self.synchronizer.cleanup(epoch, height).await;
         for x in &digests {
             self.queue.remove(x);
             self.store.delete(x.to_vec()).await;
         }
-        info!("Cleanup: Hoàn thành dọn dẹp (epoch: {}, height: {}). Đã xóa {} digests.", epoch, height, digests.len());
+        if digests.len() > 0 {
+            info!(
+                "Cleanup: Hoàn thành dọn dẹp (epoch: {}, height: {}). Đã xóa {} digests.",
+                epoch,
+                height,
+                digests.len()
+            );
+        }
     }
 
     pub async fn run(&mut self) {

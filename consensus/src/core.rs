@@ -229,7 +229,7 @@ impl Core {
         }
         debug!("start rbc epoch {}", self.epoch);
 
-        info!(
+        debug!(
             "[BƯỚC 3] Consensus core: Đang yêu cầu payload từ mempool driver cho epoch {}.",
             self.epoch
         );
@@ -240,7 +240,7 @@ impl Core {
             .await;
 
         if payload.is_empty() {
-            info!("[BƯỚC 4] Consensus core: Mempool trả về payload trống. Bỏ qua đề xuất khối lần này.");
+            debug!("[BƯỚC 4] Consensus core: Mempool trả về payload trống. Bỏ qua đề xuất khối lần này.");
         } else {
             info!(
                 "[BƯỚC 4] Consensus core: Mempool trả về payload với {} digest.",
@@ -864,7 +864,7 @@ impl Core {
             };
 
             if self.epoch > previous_epoch {
-                info!("Advanced to new epoch {}", self.epoch);
+                debug!("Advanced to new epoch {}", self.epoch);
                 epoch_start_time = Instant::now();
                 previous_epoch = self.epoch;
             }
