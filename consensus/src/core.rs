@@ -67,8 +67,6 @@ pub struct Core {
     height: SeqNumber,
     aggregator: Aggregator,
     commitor: Commitor,
-    // ---- KÊNH GỬI THÔNG BÁO SANG GO ----
-    tx_commit_notification: Sender<(Vec<Vec<u8>>, SeqNumber, SeqNumber)>,
     buffers: HashMap<(SeqNumber, SeqNumber), bool>,
     rbc_proofs: HashMap<(SeqNumber, SeqNumber, u8), RBCProof>,
     rbc_ready: HashSet<(SeqNumber, SeqNumber)>,
@@ -97,8 +95,6 @@ impl Core {
         rx_core: Receiver<ConsensusMessage>,
         network_filter: Sender<FilterInput>,
         _commit_channel: Sender<Block>,
-        // ---- THÊM THAM SỐ MỚI ----
-        tx_commit_notification: Sender<(Vec<Vec<u8>>, SeqNumber, SeqNumber)>,
     ) -> Self {
         let (tx_commit_signal, rx_commit_signal) = channel(10000);
         let aggregator = Aggregator::new(committee.clone());
@@ -121,7 +117,6 @@ impl Core {
             rx_core,
             aggregator,
             commitor,
-            tx_commit_notification,
             buffers: HashMap::new(),
             rbc_proofs: HashMap::new(),
             rbc_ready: HashSet::new(),
@@ -825,30 +820,7 @@ impl Core {
                     }
                 },
                 Some((digests, epoch, height)) = self.rx_commit_signal.recv() => {
-                    let digests_clone = digests.clone();
 
-                    let tx_commit_notification = self.tx_commit_notification.clone();
-                    let mut mempool_driver = self.mempool_driver.clone();
-
-                    // Spawn một tác vụ mới để xử lý việc lấy dữ liệu và gửi thông báo
-                    tokio::spawn(async move {
-                        let full_transactions = match mempool_driver.get_full_transactions(digests_clone).await {
-                            Ok(txs) => txs,
-                            Err(e) => {
-                                error!("[ConsensusCore] Failed to get full transactions for block (E:{}, H:{}): {}", epoch, height, e);
-                                return;
-                            }
-                        };
-
-                        let notification = (full_transactions, epoch, height);
-                        if let Err(TrySendError::Full(_)) = tx_commit_notification.try_send(notification) {
-                            warn!("[ConsensusCore] Go-Notifier channel is full. Dropping notification for block (E:{}, H:{}).", epoch, height);
-                        }
-                    });
-
-
-                    // GỌI CLEANUP MỘT CÁCH ĐỘC LẬP
-                    // Việc dọn dẹp mempool vẫn diễn ra như bình thường và không liên quan đến việc gửi sang Go.
                     self.cleanup(digests, epoch, height).await
                 },
 

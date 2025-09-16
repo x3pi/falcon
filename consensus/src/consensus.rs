@@ -33,7 +33,6 @@ impl Consensus {
         rx_core: Receiver<ConsensusMessage>,
         tx_consensus_mempool: Sender<ConsensusMempoolMessage>,
         tx_commit: Sender<Block>,
-        tx_commit_notification: Sender<(Vec<Vec<u8>>, SeqNumber, SeqNumber)>, // ĐÃ SỬA: Kiểu dữ liệu kênh
         protocol: Protocol,
     ) -> ConsensusResult<()> {
         info!(
@@ -117,7 +116,6 @@ impl Consensus {
                     rx_core,
                     tx_filter,
                     tx_commit,
-                    tx_commit_notification,
                 );
                 tokio::spawn(async move {
                     core.run().await;
