@@ -1,0 +1,28 @@
+// grouptxns.proto
+
+syntax = "proto3";
+package grouptxns;
+
+// Thay "your_module_name" bằng tên module trong file go.mod của bạn
+option go_package = "/proto";
+
+// Import message Transaction từ file transaction.proto
+import "transaction.proto";
+
+// Định nghĩa cho message RelativeGroup
+message RelativeGroup {
+    int32 group_id = 1;
+    repeated Item items = 2;
+    repeated bytes relatives = 3;
+}
+
+// Định nghĩa cho message Item
+message Item {
+    int32 id = 1;
+    repeated bytes array = 2;
+    int32 group_id = 3;
+    // Sử dụng message Transaction đã được import
+    transaction.Transaction tx = 4;
+    // Sử dụng int64 để lưu Unix timestamp (số giây)
+    int64 time_start = 5;
+}

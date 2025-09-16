@@ -1,0 +1,12 @@
+syntax = "proto3";
+package block_vote;
+
+option go_package = "/proto";
+option java_package = "com.meta_node.protos.compiled.block_vote";
+
+message BlockVote {
+  bytes BlockHash = 1;
+  uint64 Number = 2;
+  bytes PublicKey = 3;
+  bytes Sign = 4;
+}
