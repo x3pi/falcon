@@ -848,6 +848,16 @@ impl Core {
                     }
                 },
                 Some((digest,epoch,height)) = self.rx_commit.recv()=>{
+                    let transactions = self.mempool_driver.get_transactions(digest.clone()).await;
+
+                    if !transactions.is_empty() {
+                        info!("Preparing to execute transactions for committed epoch {}:", epoch);
+                        for (i, tx) in transactions.iter().enumerate() {
+                            // Ví dụ: Ghi log hoặc gọi một state machine để thực thi
+                            // info!("  Tx {}: {:?}", i + 1, tx);
+                        }
+                    }
+
                     self.cleanup(digest,epoch,height).await
                 },
                 else => break,

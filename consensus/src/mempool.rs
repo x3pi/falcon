@@ -17,6 +17,7 @@ pub enum ConsensusMempoolMessage {
     Get(usize, oneshot::Sender<Vec<Digest>>),
     Verify(Box<Block>, oneshot::Sender<PayloadStatus>),
     Cleanup(Vec<Digest>, SeqNumber, SeqNumber),
+    GetTransactions(Vec<Digest>, oneshot::Sender<Vec<Vec<u8>>>),
 }
 
 pub struct MempoolDriver {
@@ -39,6 +40,22 @@ impl MempoolDriver {
             .await
             .expect("Failed to receive payload from mempool")
     }
+
+    pub async fn get_transactions(&mut self, digests: Vec<Digest>) -> Vec<Vec<u8>> {
+        if digests.is_empty() {
+            return Vec::new();
+        }
+        let (sender, receiver) = oneshot::channel();
+        let message = ConsensusMempoolMessage::GetTransactions(digests, sender);
+        self.mempool_channel
+            .send(message)
+            .await
+            .expect("Failed to send GetTransactions message to mempool");
+        receiver
+            .await
+            .expect("Failed to receive transactions from mempool")
+    }
+
 
     //验证mempool是否已经收到了区块
     pub async fn verify(&mut self, block: Block) -> ConsensusResult<bool> {

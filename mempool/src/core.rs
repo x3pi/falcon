@@ -1,6 +1,6 @@
 use crate::config::{Committee, Parameters};
 use crate::error::{MempoolError, MempoolResult};
-use crate::messages::Payload;
+use crate::messages::{Payload, Transaction};
 use crate::payload::PayloadMaker;
 use crate::synchronizer::Synchronizer;
 use consensus::{Block, ConsensusMempoolMessage, PayloadStatus, SeqNumber};
@@ -216,6 +216,18 @@ impl Core {
         }
     }
 
+    async fn get_transactions(&mut self, digests: Vec<Digest>) -> MempoolResult<Vec<Transaction>> {
+        let mut transactions = Vec::new();
+        for digest in &digests {
+            if let Some(bytes) = self.store.read(digest.to_vec()).await? {
+                let payload: Payload = bincode::deserialize(&bytes)?;
+                // Gộp các giao dịch từ nhiều payload vào một danh sách duy nhất.
+                transactions.extend(payload.transactions);
+            }
+        }
+        Ok(transactions)
+    }
+
     pub async fn run(&mut self) {
         let log = |result: Result<&(), &MempoolError>| match result {
             Ok(()) => (),
@@ -249,6 +261,10 @@ impl Core {
                                 Err(_) => PayloadStatus::Reject,
                             };
                             let _ = sender.send(status);
+                        },
+                        ConsensusMempoolMessage::GetTransactions(digests, sender) => {
+                            let result = self.get_transactions(digests).await;
+                            let _ = sender.send(result.unwrap_or_default());
                         },
                         ConsensusMempoolMessage::Cleanup(digests,epoch,height) => self.cleanup(digests,epoch,height).await,//
                     }
