@@ -24,6 +24,9 @@ pub enum NetworkError {
     SerializationError(#[from] Box<bincode::ErrorKind>),
 }
 
+// Giới hạn kích thước gói tin tối đa, được dùng chung cho cả sender và receiver.
+const MAX_FRAME_SIZE: usize = 250 * 1024 * 1024; // 250MB
+
 pub struct NetMessage(pub Bytes, pub Vec<SocketAddr>);
 
 pub struct NetSender {
@@ -35,21 +38,15 @@ impl NetSender {
         Self { transmit }
     }
 
-    // We keep alive one TCP connection per peer, each of which is handled
-    // by a separate thread (called worker). We communicate with our workers
-    // with a dedicated channel kept by the HashMap called `senders`. If the
-    // a connection die, we make a new one.
     pub async fn run(&mut self) {
         let mut senders = HashMap::<_, Sender<_>>::new();
         while let Some(NetMessage(bytes, addresses)) = self.transmit.recv().await {
             for address in addresses {
                 let spawn = match senders.get(&address) {
-                    //如果connect存在直接发送
                     Some(tx) => tx.send(bytes.clone()).await.is_err(),
                     None => true,
                 };
                 if spawn {
-                    //如果不存在则创建一个新的连接
                     let tx = Self::spawn_worker(address).await;
                     if let Ok(()) = tx.send(bytes.clone()).await {
                         senders.insert(address, tx);
@@ -60,7 +57,6 @@ impl NetSender {
     }
 
     async fn spawn_worker(address: SocketAddr) -> Sender<Bytes> {
-        // Each worker handle a TCP connection with on address.
         let (tx, mut rx) = channel(10000);
         tokio::spawn(async move {
             let stream = match TcpStream::connect(address).await {
@@ -73,11 +69,11 @@ impl NetSender {
                     return;
                 }
             };
-            const MAX_FRAME_SIZE: usize = 250 * 1024 * 1024; // Đặt giới hạn là 25MB, lớn hơn 20MB
 
             let mut codec = LengthDelimitedCodec::new();
             codec.set_max_frame_length(MAX_FRAME_SIZE);
             let mut transport = Framed::new(stream, codec);
+
             while let Some(message) = rx.recv().await {
                 match transport.send(message).await {
                     Ok(_) => debug!("Successfully sent message to {}", address),
@@ -102,8 +98,6 @@ impl<Message: 'static + Send + DeserializeOwned + Debug> NetReceiver<Message> {
         Self { address, deliver }
     }
 
-    // For each incoming request, we spawn a new worker responsible to receive
-    // messages and replay them through the provided deliver channel.
     pub async fn run(&self) {
         let listener = TcpListener::bind(&self.address)
             .await
@@ -125,11 +119,10 @@ impl<Message: 'static + Send + DeserializeOwned + Debug> NetReceiver<Message> {
 
     async fn spawn_worker(socket: TcpStream, peer: SocketAddr, deliver: Sender<Message>) {
         tokio::spawn(async move {
-            const MAX_FRAME_SIZE: usize = 250 * 1024 * 1024; // Đặt giới hạn là 25MB, lớn hơn 20MB
-
             let mut codec = LengthDelimitedCodec::new();
             codec.set_max_frame_length(MAX_FRAME_SIZE);
             let mut transport = Framed::new(socket, codec);
+
             while let Some(frame) = transport.next().await {
                 match frame
                     .map_err(NetworkError::from)
@@ -137,10 +130,10 @@ impl<Message: 'static + Send + DeserializeOwned + Debug> NetReceiver<Message> {
                 {
                     Ok(message) => {
                         debug!("Received {:?}", message);
-                        deliver
-                            .send(message)
-                            .await
-                            .expect("Failed to deliver message");
+                        if deliver.send(message).await.is_err() {
+                            // Core channel is closed.
+                            break;
+                        }
                     }
                     Err(e) => {
                         warn!("{}", e);

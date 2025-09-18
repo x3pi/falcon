@@ -73,7 +73,10 @@ async fn end_to_end() {
             let address = committee.clone().front_address(&name).unwrap();
             tokio::spawn(async move {
                 let stream = TcpStream::connect(address).await.unwrap();
-                let mut transport = Framed::new(stream, LengthDelimitedCodec::new());
+                const MAX_FRAME_SIZE: usize = 250 * 1024 * 1024; // 25MB
+                let mut codec = LengthDelimitedCodec::new();
+                codec.set_max_frame_length(MAX_FRAME_SIZE);
+                let transport = Framed::new(socket, codec);
                 let transaction = vec![1u8];
                 let bytes = Bytes::from(transaction.to_vec());
                 transport.send(bytes.clone()).await.unwrap();

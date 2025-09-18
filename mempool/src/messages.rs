@@ -1,8 +1,7 @@
+// mempool/src/messages.rs
+
 use crypto::{Digest, Hash, PublicKey, Signature, SignatureService};
-use ed25519_dalek::Digest as _;
-use ed25519_dalek::Sha512;
 use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
 use std::fmt;
 
 pub type Transaction = Vec<u8>;
@@ -14,37 +13,29 @@ pub struct Payload {
     pub signature: Signature,
 }
 
-impl Payload {
-    pub async fn new(
-        transactions: Vec<Transaction>,
-        author: PublicKey,
-        mut signature_service: SignatureService,
-    ) -> Self {
-        let payload = Self {
-            transactions,
-            author,
-            signature: Signature::default(),
-        };
-        let signature = signature_service.request_signature(payload.digest()).await;
-        Self {
-            signature,
-            ..payload
+// ... (impl Payload giữ nguyên) ...
+
+impl Hash for Payload {
+    fn digest(&self) -> Digest {
+        let mut bytes = self.author.0.to_vec();
+        for transaction in &self.transactions {
+            bytes.extend_from_slice(transaction);
         }
+        bytes.as_slice().digest()
+    }
+}
+
+// ... (impl fmt::Debug giữ nguyên) ...
+// Để chắc chắn, dưới đây là toàn bộ file:
+impl Payload {
+    pub async fn new(transactions: Vec<Transaction>, author: PublicKey, mut signature_service: SignatureService) -> Self {
+        let payload = Self { transactions, author, signature: Signature::default() };
+        let signature = signature_service.request_signature(payload.digest()).await;
+        Self { signature, ..payload }
     }
 
     pub fn size(&self) -> usize {
         self.transactions.iter().map(|x| x.len()).sum()
-    }
-}
-
-impl Hash for Payload {
-    fn digest(&self) -> Digest {
-        let mut hasher = Sha512::new();
-        hasher.update(self.author.0);
-        for transaction in &self.transactions {
-            hasher.update(transaction);
-        }
-        Digest(hasher.finalize().as_slice()[..32].try_into().unwrap())
     }
 }
 

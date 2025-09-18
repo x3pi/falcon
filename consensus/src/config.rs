@@ -100,10 +100,20 @@ impl Committee {
     }
 
     pub fn quorum_threshold(&self) -> Stake {
-        // If N = 3f + 1 + k (0 <= k < 3)
-        // then (2 N + 3) / 3 = 2f + 1 + (2k + 2)/3 = 2f + 1 + k = N - f
+        // Lấy tổng số node (giả sử mỗi node có stake là 1).
         let total_votes: Stake = self.authorities.values().map(|x| x.stake).sum();
-        2 * ((total_votes - 1) / 3) + 1
+
+        // FIX: Công thức cũ `2 * ((total_votes - 1) / 3) + 1` tính toán sai quorum
+        // cho các trường hợp N không phải là 3f+1 (ví dụ N=5).
+        // Chúng ta thay thế nó bằng công thức BFT tiêu chuẩn và an toàn là N - f.
+
+        // Tính số node lỗi (f) mà hệ thống có thể chịu được.
+        let f = (total_votes - 1) / 3;
+
+        // Quorum an toàn phải là N - f.
+        // Với N=4, f=1 -> quorum=3.
+        // Với N=5, f=1 -> quorum=4.
+        total_votes - f
     }
 
     // This threshold is used only to sychronize the nodes in a hacky way during the geo-distributed experiments, where different machines can start at different times, but the consensus protocol need most of the nodes to start at roughly the same time to have good performance.

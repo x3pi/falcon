@@ -101,22 +101,36 @@ impl RBCProofMaker {
         siganture: Signature,
         committee: &Committee,
     ) -> ConsensusResult<Option<RBCProof>> {
-        // Ensure it is the first time this authority votes.
-        ensure!(
-            self.used.insert(author),
-            ConsensusError::AuthorityReuseinRBCVote(author)
-        );
-        self.votes.push((author, siganture));
-        self.weight += committee.stake(&author);
-
-        if self.weight == committee.quorum_threshold()
-            || (tag == RBC_READY && self.weight == committee.random_coin_threshold())
-        {
-            let proof = RBCProof::new(epoch, height, self.votes.clone(), tag);
-            return Ok(Some(proof));
+        // Đảm bảo mỗi node chỉ bỏ phiếu một lần.
+        if self.used.insert(author) {
+            self.votes.push((author, siganture));
+            self.weight += committee.stake(&author);
+        } else {
+            // Phiếu bầu đã tồn tại, bỏ qua một cách nhẹ nhàng.
+            return Ok(None);
         }
-        Ok(None)
+
+        let quorum_threshold = committee.quorum_threshold();
+        let random_coin_threshold = committee.random_coin_threshold();
+
+        // Kiểm tra xem đã đủ điều kiện để tạo bằng chứng (proof) hay chưa.
+        let mut make_proof = false;
+        if self.weight >= quorum_threshold {
+            make_proof = true;
+        } else if tag == RBC_READY && self.weight >= random_coin_threshold {
+            // Trường hợp đặc biệt cho ReadyVote để chạy coin ngẫu nhiên.
+            make_proof = true;
+        }
+
+        if make_proof {
+            // Khi một proof được tạo, aggregator này đã hoàn thành nhiệm vụ.
+            let proof = RBCProof::new(epoch, height, self.votes.clone(), tag);
+            Ok(Some(proof))
+        } else {
+            Ok(None)
+        }
     }
+
 }
 
 struct PrepareMaker {

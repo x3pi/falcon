@@ -8,7 +8,10 @@ pub fn listener(address: SocketAddr) -> JoinHandle<()> {
     tokio::spawn(async move {
         let listener = TcpListener::bind(&address).await.unwrap();
         let (socket, _) = listener.accept().await.unwrap();
-        let mut transport = Framed::new(socket, LengthDelimitedCodec::new());
+        const MAX_FRAME_SIZE: usize = 250 * 1024 * 1024; // 25MB
+        let mut codec = LengthDelimitedCodec::new();
+        codec.set_max_frame_length(MAX_FRAME_SIZE);
+        let mut transport = Framed::new(socket, codec);
         match transport.next().await {
             Some(Ok(_)) => assert!(true),
             _ => assert!(false),
@@ -81,7 +84,10 @@ async fn receive() {
     let message = "Ok";
     let bytes = Bytes::from(bincode::serialize(message).unwrap());
     let stream = TcpStream::connect(address).await.unwrap();
-    let mut transport = Framed::new(stream, LengthDelimitedCodec::new());
+    const MAX_FRAME_SIZE: usize = 250 * 1024 * 1024; // 25MB
+    let mut codec = LengthDelimitedCodec::new();
+    codec.set_max_frame_length(MAX_FRAME_SIZE);
+    let mut transport = Framed::new(socket, codec);
     transport.send(bytes.clone()).await.unwrap();
 
     // Ensure the message gets passed to the channel.
