@@ -1,3 +1,5 @@
+// mempool/src/tests/core_tests.rs
+
 use super::*;
 use crate::common::{committee, keys, payload};
 use crate::messages::Transaction;
@@ -29,7 +31,7 @@ async fn core(
         max_payload_size: 1,
         min_block_delay: 0,
     };
-    let signature_service = SignatureService::new(secret, None);
+    let signature_service = SignatureService::new(secret);
     let _ = fs::remove_dir_all(store_path);
     let store = Store::new(store_path).unwrap();
     let synchronizer = Synchronizer::new(
@@ -111,7 +113,10 @@ async fn get_payload() {
 
     // Get the next payload.
     let (sender, receiver) = oneshot::channel();
-    let message = ConsensusMempoolMessage::Get(64, sender);
+    
+    // SỬA LỖI Ở ĐÂY: Thêm epoch (0) và height (0) vào thông điệp
+    let message = ConsensusMempoolMessage::Get(64, 0, 0, sender);
+    
     tx_consensus.send(message).await.unwrap();
     let result = receiver.await.unwrap();
     assert_eq!(result, vec![payload().digest()]);

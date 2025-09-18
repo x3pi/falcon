@@ -4,8 +4,8 @@ use crate::messages::{Payload, Transaction};
 use crate::payload::PayloadMaker;
 use crate::synchronizer::Synchronizer;
 use consensus::{Block, ConsensusMempoolMessage, PayloadStatus, SeqNumber};
-use crypto::Hash as _;
-use crypto::{Digest, PublicKey};
+use crypto::{Digest, Hash, PublicKey};
+
 #[cfg(feature = "benchmark")]
 use log::info;
 use log::{error, warn};
@@ -186,23 +186,61 @@ impl Core {
         Ok(())
     }
 
-    async fn get_payload(&mut self, max: usize) -> MempoolResult<Vec<Digest>> {
+    async fn get_payload(
+        &mut self,
+        max: usize,
+        epoch: SeqNumber,
+        height: SeqNumber,
+    ) -> MempoolResult<Vec<Digest>> {
+        // Bước 1: Nếu hàng đợi rỗng, thử tạo một payload mới từ các giao dịch của client
+        // và thêm nó vào hàng đợi chung.
         if self.queue.is_empty() {
             if let Some(payload) = self.payload_maker.make().await {
-                let digest = payload.digest();
-                self.process_own_payload(&digest, payload).await?;
-                Ok(vec![digest])
-            } else {
-                Ok(Vec::new())
+                // handle_own_payload sẽ xử lý việc lưu trữ, thêm vào seen_transactions,
+                // và quan trọng nhất là thêm digest của payload vào self.queue.
+                self.handle_own_payload(payload).await?;
             }
-        } else {
-            let digest_len = Digest::default().size();
-            let digests = self.queue.iter().take(max / digest_len).cloned().collect();
-            for x in &digests {
-                self.queue.remove(x); //去重
-            }
-            Ok(digests)
         }
+
+        // Bước 2: Sau khi đã cố gắng bổ sung, nếu hàng đợi vẫn rỗng thì không có gì để đề xuất.
+        if self.queue.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Bước 3: LUÔN LUÔN áp dụng logic phân vùng động cho tất cả những gì có trong hàng đợi.
+        let digest_len = Digest::default().size();
+        let max_payloads = max / digest_len;
+
+        let mut ordered_payloads: Vec<Digest> = self.queue.iter().cloned().collect();
+        ordered_payloads.sort_by_key(|d| d.0);
+
+        let committee_size = self.committee.size() as u64;
+        let node_id = height;
+        
+        let responsible_partition = (node_id + epoch) % committee_size;
+
+        let selected_digests: Vec<Digest> = ordered_payloads
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| (*i as u64 % committee_size) == responsible_partition)
+            .map(|(_, digest)| digest)
+            .take(max_payloads)
+            .collect();
+
+        // Xóa các payload đã được chọn khỏi hàng đợi để chúng không được đề xuất lại.
+        for digest in &selected_digests {
+            self.queue.remove(digest);
+        }
+        
+        info!(
+            "Epoch {}: Node {} is responsible for partition {} and selected {} payloads.",
+            epoch,
+            node_id,
+            responsible_partition,
+            selected_digests.len()
+        );
+
+        Ok(selected_digests)
     }
 
     async fn verify_payload(&mut self, block: Box<Block>) -> MempoolResult<bool> {
@@ -240,20 +278,22 @@ impl Core {
             let result = tokio::select! {
                 Some(message) = self.core_channel.recv() => {
                     match message {
-                        MempoolMessage::OwnPayload(payload) => self.handle_own_payload(payload).await, //处理本地生成的PayLoad,并向其他节点发送payload
-                        MempoolMessage::Payload(payload) => self.handle_others_payload(payload).await,  //将其他人发送过来的payload存入本地
-                        MempoolMessage::PayloadRequest(digest, sender) => self.handle_request(digest, sender).await,    //返回digest对应的payload
+                        MempoolMessage::OwnPayload(payload) => self.handle_own_payload(payload).await,
+                        MempoolMessage::Payload(payload) => self.handle_others_payload(payload).await,
+                        MempoolMessage::PayloadRequest(digest, sender) => self.handle_request(digest, sender).await,
                     }
                 },
-                Some(message) = self.consensus_channel.recv() => {//处理共识发送的Payload请求
+                Some(message) = self.consensus_channel.recv() => {
                     match message {
-                        ConsensusMempoolMessage::Get(max, sender) => {
-                            let result = self.get_payload(max).await;
+                        // Đảm bảo match arm này nhận đủ 4 tham số
+                        ConsensusMempoolMessage::Get(max, epoch, height, sender) => {
+                            // Và lời gọi hàm get_payload truyền đủ 3 tham số
+                            let result = self.get_payload(max, epoch, height).await;
                             log(result.as_ref().map(|_| &()));
                             let _ = sender.send(result.unwrap_or_default());
                         },
-                        ConsensusMempoolMessage::Verify(block, sender) => {//验证区块中所包含的payload是否在本地都有
-                            let result = self.verify_payload(block).await;//如果没有，则向其他节点发送request
+                        ConsensusMempoolMessage::Verify(block, sender) => {
+                            let result = self.verify_payload(block).await;
                             log(result.as_ref().map(|_| &()));
                             let status = match result {
                                 Ok(true) => PayloadStatus::Accept,
@@ -266,7 +306,7 @@ impl Core {
                             let result = self.get_transactions(digests).await;
                             let _ = sender.send(result.unwrap_or_default());
                         },
-                        ConsensusMempoolMessage::Cleanup(digests,epoch,height) => self.cleanup(digests,epoch,height).await,//
+                        ConsensusMempoolMessage::Cleanup(digests,epoch,height) => self.cleanup(digests,epoch,height).await,
                     }
                     Ok(())
                 },

@@ -102,7 +102,6 @@ pub struct Core {
     aba_mux_flags: HashMap<(SeqNumber, SeqNumber, SeqNumber), [bool; 2]>,
     aba_outputs: HashMap<(SeqNumber, SeqNumber, SeqNumber), HashSet<PublicKey>>,
     aba_ends: HashMap<(SeqNumber, SeqNumber), bool>,
-
 }
 
 impl Core {
@@ -246,9 +245,10 @@ impl Core {
         }
         debug!("start rbc epoch {}", self.epoch);
         let payload = self
-            .mempool_driver
-            .get(self.parameters.max_payload_size)
-            .await;
+        .mempool_driver
+        .get(self.parameters.max_payload_size, self.epoch, self.height)
+        .await;
+        
         let block = Block::new(
             self.name,
             self.epoch,
@@ -296,6 +296,9 @@ impl Core {
             "processing RBC val epoch {} height {}",
             block.epoch, block.height
         );
+
+
+
         block.verify(&self.committee)?;
         if self.parameters.exp > 0 {
             if !self.mempool_driver.verify(block.clone()).await? {
