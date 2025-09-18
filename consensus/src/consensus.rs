@@ -17,7 +17,8 @@ use futures::future::join_all;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 
-
+type Transaction = Vec<u8>;
+type TransactionList = Vec<Transaction>;
 pub struct Consensus;
 
 impl Consensus {
@@ -33,6 +34,8 @@ impl Consensus {
         tx_consensus_mempool: Sender<ConsensusMempoolMessage>,
         tx_commit: Sender<Block>,
         protocol: Protocol,
+        tx_executor: Option<Sender<TransactionList>>,
+
     ) -> ConsensusResult<()> {
         info!(
             "Consensus timeout delay set to {} ms",
@@ -115,6 +118,7 @@ impl Consensus {
                     /* core_channel */ rx_core,
                     /* network_filter */ tx_filter,
                     /* commit_channel */ tx_commit,
+                    tx_executor,
                 );
                 tokio::spawn(async move {
                     core.run().await;

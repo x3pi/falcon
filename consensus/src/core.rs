@@ -17,6 +17,11 @@ use serde::{Deserialize, Serialize};
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{sleep, Duration};
+type Transaction = Vec<u8>;
+type TransactionList = Vec<Transaction>;
+
+
+
 #[cfg(test)]
 #[path = "tests/core_tests.rs"]
 pub mod core_tests;
@@ -62,6 +67,7 @@ pub struct Core {
     rx_core: Receiver<ConsensusMessage>,
     network_filter: Sender<FilterInput>,
     _commit_channel: Sender<Block>,
+    tx_executor: Option<Sender<TransactionList>>,
     rx_commit: Receiver<(Vec<Digest>, SeqNumber, SeqNumber)>,
     fallback: SeqNumber,
     epoch: SeqNumber,
@@ -80,6 +86,7 @@ pub struct Core {
     aba_mux_flags: HashMap<(SeqNumber, SeqNumber, SeqNumber), [bool; 2]>,
     aba_outputs: HashMap<(SeqNumber, SeqNumber, SeqNumber), HashSet<PublicKey>>,
     aba_ends: HashMap<(SeqNumber, SeqNumber), bool>,
+
 }
 
 impl Core {
@@ -96,6 +103,8 @@ impl Core {
         rx_core: Receiver<ConsensusMessage>,
         network_filter: Sender<FilterInput>,
         commit_channel: Sender<Block>,
+        tx_executor: Option<Sender<TransactionList>>,
+
     ) -> Self {
         let (tx_commit, rx_commit) = channel(10000);
         let aggregator = Aggregator::new(committee.clone());
@@ -114,6 +123,7 @@ impl Core {
             network_filter,
             rx_commit,
             _commit_channel: commit_channel,
+            tx_executor,
             _tx_core: tx_core,
             rx_core,
             aggregator,
@@ -848,13 +858,16 @@ impl Core {
                     }
                 },
                 Some((digest,epoch,height)) = self.rx_commit.recv()=>{
+
                     let transactions = self.mempool_driver.get_transactions(digest.clone()).await;
 
-                    if !transactions.is_empty() {
-                        info!("Preparing to execute transactions for committed epoch {}:", epoch);
-                        for (i, tx) in transactions.iter().enumerate() {
-                            // Ví dụ: Ghi log hoặc gọi một state machine để thực thi
-                            // info!("  Tx {}: {:?}", i + 1, tx);
+                    // GỬI GIAO DỊCH ĐẾN EXECUTOR MÀ KHÔNG CẦN CHỜ ĐỢI
+                    if let Some(tx_executor) = &self.tx_executor {
+                        if !transactions.is_empty() {
+                            info!("Consensus: Forwarding {} transactions for epoch {} to executor.", transactions.len(), epoch);
+                            if let Err(e) = tx_executor.send(transactions).await {
+                                error!("Consensus: Failed to send transactions to executor channel: {}", e);
+                            }
                         }
                     }
 

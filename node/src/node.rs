@@ -1,3 +1,6 @@
+
+
+
 use crate::config::Export as _;
 use crate::config::{Committee, Parameters, Secret};
 use consensus::{Block, Consensus, ConsensusError, Protocol};
@@ -6,7 +9,11 @@ use log::{info, warn};
 use mempool::{Mempool, MempoolError};
 use store::{Store, StoreError};
 use thiserror::Error;
+use crate::executor::Executor;
 use tokio::sync::mpsc::{channel, Receiver};
+
+type Transaction = Vec<u8>;
+type TransactionList = Vec<Transaction>;
 
 #[derive(Error, Debug)]
 pub enum NodeError {
@@ -36,11 +43,24 @@ impl Node {
         key_file: &str,
         store_path: &str,
         parameters: Option<&str>,
+        executor_socket: Option<String>,
+
     ) -> Result<Self, NodeError> {
         let (tx_commit, rx_commit) = channel(10000); //commit channel
         let (tx_consensus, rx_consensus) = channel(10000); // 协议交流消息
         let (tx_consensus_mempool, rx_consensus_mempool) = channel(10000);
+        let (tx_executor, rx_executor) = channel::<TransactionList>(100);
 
+        // 2. KHỞI TẠO VÀ CHẠY EXECUTOR TRONG MỘT TASK RIÊNG
+        if let Some(socket_path) = executor_socket {
+            info!("Executor is enabled. Will send committed transactions to socket: {}", socket_path);
+            let mut executor = Executor::new(rx_executor, socket_path);
+            tokio::spawn(async move {
+                executor.run().await;
+            });
+        } else {
+            warn!("Executor is disabled. Committed transactions will not be sent anywhere.");
+        }
         // Read the committee and secret key from file.
         let committee = Committee::read(committee_file)?;
         info!("committee {:?}", committee);
@@ -93,6 +113,7 @@ impl Node {
             tx_consensus_mempool,
             tx_commit,
             protocol,
+            Some(tx_executor)
         )
         .await?;
 
