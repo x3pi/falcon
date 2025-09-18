@@ -3,7 +3,7 @@
 
 use crate::config::Export as _;
 use crate::config::{Committee, Parameters, Secret};
-use consensus::{Block, Consensus, ConsensusError, Protocol};
+use consensus::{Block,CommittedEpochData, Consensus, ConsensusError, Protocol};
 use crypto::{SignatureService};
 use log::{info, warn};
 use mempool::{Mempool, MempoolError};
@@ -11,9 +11,6 @@ use store::{Store, StoreError};
 use thiserror::Error;
 use crate::executor::Executor;
 use tokio::sync::mpsc::{channel, Receiver};
-
-type Transaction = Vec<u8>;
-type TransactionList = Vec<Transaction>;
 
 #[derive(Error, Debug)]
 pub enum NodeError {
@@ -49,7 +46,7 @@ impl Node {
         let (tx_commit, rx_commit) = channel(10000); //commit channel
         let (tx_consensus, rx_consensus) = channel(10000); // 协议交流消息
         let (tx_consensus_mempool, rx_consensus_mempool) = channel(10000);
-        let (tx_executor, rx_executor) = channel::<TransactionList>(100);
+        let (tx_executor, rx_executor) = channel::<CommittedEpochData>(100);
 
         // 2. KHỞI TẠO VÀ CHẠY EXECUTOR TRONG MỘT TASK RIÊNG
         if let Some(socket_path) = executor_socket {

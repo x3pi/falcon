@@ -1,24 +1,22 @@
 use std::time::Duration;
 
 use crate::config::{Committee, Parameters, Protocol};
-use crate::core::{ConsensusMessage, Core};
+// THÊM IMPORT CommittedEpochData
+use crate::core::{CommittedEpochData, ConsensusMessage, Core};
 use crate::error::ConsensusResult;
 use crate::filter::Filter;
 use crate::mempool::{ConsensusMempoolMessage, MempoolDriver};
 use crate::messages::Block;
 use crate::synchronizer::Synchronizer;
 use crypto::{PublicKey, SignatureService};
+use futures::future::join_all;
 use log::info;
 use network::{NetReceiver, NetSender};
 use store::Store;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-// use tokio::time::{Duration, sleep};
-use futures::future::join_all;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::sleep;
 
-type Transaction = Vec<u8>;
-type TransactionList = Vec<Transaction>;
 pub struct Consensus;
 
 impl Consensus {
@@ -34,8 +32,8 @@ impl Consensus {
         tx_consensus_mempool: Sender<ConsensusMempoolMessage>,
         tx_commit: Sender<Block>,
         protocol: Protocol,
-        tx_executor: Option<Sender<TransactionList>>,
-
+        // THAY ĐỔI KIỂU CỦA tx_executor
+        tx_executor: Option<Sender<CommittedEpochData>>,
     ) -> ConsensusResult<()> {
         info!(
             "Consensus timeout delay set to {} ms",

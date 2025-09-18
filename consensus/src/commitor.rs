@@ -1,8 +1,9 @@
+// consensus/src/commitor.rs
+
 use std::usize;
 
 use crate::Block;
-use crate::{config::Committee, SeqNumber};
-use crypto::Digest;
+use crate::{config::Committee};
 use log::{debug, info};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -12,13 +13,12 @@ async fn try_to_commit(
     mut cur_ind: usize,
     buffer: &mut Vec<Option<Block>>,
     filter: &mut Vec<bool>,
-    tx_commit: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
+    tx_commit: Sender<Vec<Block>>, // <-- THAY ĐỔI Ở ĐÂY
 ) -> usize {
-    let mut data = Vec::new();
-    let mut digests = Vec::new();
+    let mut committed_blocks = Vec::new();
     loop {
         if let Some(block) = buffer[cur_ind].clone() {
-            data.push(block);
+            committed_blocks.push(block);
             buffer[cur_ind] = None;
             cur_ind = (cur_ind + 1) % MAX_BLOCK_BUFFER
         } else if filter[cur_ind] {
@@ -28,29 +28,28 @@ async fn try_to_commit(
             break;
         }
     }
-    let (mut e, mut h): (SeqNumber, SeqNumber) = (0, 0);
-    //向共识层发送可以提交的块
-    for block in data {
-        if !block.payload.is_empty() {
-            info!("Committed {}", block);
+    
+    // Gửi đi cả danh sách các block đã commit
+    if !committed_blocks.is_empty() {
+        for block in &committed_blocks {
+            if !block.payload.is_empty() {
+                info!("Committed {}", block);
 
-            #[cfg(feature = "benchmark")]
-            for x in &block.payload {
-                info!(
-                    "Committed B{}({}) epoch {}",
-                    block.height,
-                    base64::encode(x),
-                    block.epoch,
-                );
+                #[cfg(feature = "benchmark")]
+                for x in &block.payload {
+                    info!(
+                        "Committed B{}({}) epoch {}",
+                        block.height,
+                        base64::encode(x),
+                        block.epoch,
+                    );
+                }
             }
-            digests.append(&mut block.payload.clone());
+            debug!("Committed {}", block);
         }
-        debug!("Committed {}", block);
-        (e, h) = (block.epoch, block.height)
-    }
-    if !digests.is_empty() {
-        if let Err(e) = tx_commit.send((digests, e, h)).await {
-            panic!("Failed to filter block to commiter core: {}", e);
+        
+        if let Err(e) = tx_commit.send(committed_blocks).await {
+            panic!("Failed to send committed blocks to core: {}", e);
         }
     }
     cur_ind
@@ -63,7 +62,7 @@ pub struct Commitor {
 
 impl Commitor {
     pub fn new(
-        tx_commit: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
+        tx_commit: Sender<Vec<Block>>, // <-- THAY ĐỔI Ở ĐÂY
         committee: Committee,
     ) -> Self {
         let (tx_block, mut rx_block): (_, Receiver<Block>) = channel(10000);

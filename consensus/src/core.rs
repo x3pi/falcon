@@ -41,6 +41,22 @@ pub const MUX_PHASE: u8 = 1;
 pub const OPT: u8 = 1;
 pub const PES: u8 = 0;
 
+
+// ĐỊNH NGHĨA STRUCT MỚI ĐỂ GỬI CHO EXECUTOR
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FullBlock {
+    pub author: PublicKey,
+    pub epoch: SeqNumber,
+    pub height: SeqNumber,
+    pub transactions: TransactionList,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CommittedEpochData {
+    pub epoch: SeqNumber,
+    pub blocks: Vec<FullBlock>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ConsensusMessage {
     RBCValMsg(Block),
@@ -67,8 +83,8 @@ pub struct Core {
     rx_core: Receiver<ConsensusMessage>,
     network_filter: Sender<FilterInput>,
     _commit_channel: Sender<Block>,
-    tx_executor: Option<Sender<TransactionList>>,
-    rx_commit: Receiver<(Vec<Digest>, SeqNumber, SeqNumber)>,
+    tx_executor: Option<Sender<CommittedEpochData>>,
+    rx_commit: Receiver<Vec<Block>>,
     fallback: SeqNumber,
     epoch: SeqNumber,
     height: SeqNumber,
@@ -103,7 +119,7 @@ impl Core {
         rx_core: Receiver<ConsensusMessage>,
         network_filter: Sender<FilterInput>,
         commit_channel: Sender<Block>,
-        tx_executor: Option<Sender<TransactionList>>,
+        tx_executor: Option<Sender<CommittedEpochData>>,
 
     ) -> Self {
         let (tx_commit, rx_commit) = channel(10000);
@@ -857,21 +873,57 @@ impl Core {
                         ConsensusMessage::SyncReplyMsg(block) => self.handle_sync_reply(&block).await,
                     }
                 },
-                Some((digest,epoch,height)) = self.rx_commit.recv()=>{
+                Some(committed_blocks) = self.rx_commit.recv()=>{
+                    if committed_blocks.is_empty() {
+                        continue;
+                    }
 
-                    let transactions = self.mempool_driver.get_transactions(digest.clone()).await;
+                    // Nhóm các block theo epoch
+                    let mut epoch_map: HashMap<SeqNumber, Vec<Block>> = HashMap::new();
+                    for block in committed_blocks.clone() {
+                        epoch_map.entry(block.epoch).or_default().push(block);
+                    }
 
-                    // GỬI GIAO DỊCH ĐẾN EXECUTOR MÀ KHÔNG CẦN CHỜ ĐỢI
-                    if let Some(tx_executor) = &self.tx_executor {
-                        if !transactions.is_empty() {
-                            info!("Consensus: Forwarding {} transactions for epoch {} to executor.", transactions.len(), epoch);
-                            if let Err(e) = tx_executor.send(transactions).await {
-                                error!("Consensus: Failed to send transactions to executor channel: {}", e);
+                    let mut all_digests = Vec::new();
+
+                    // Xử lý từng epoch
+                    for (epoch, blocks) in epoch_map {
+                        let mut full_blocks = Vec::new();
+                        for block in blocks {
+                            let transactions = self.mempool_driver.get_transactions(block.payload.clone()).await;
+                            all_digests.extend(block.payload.clone());
+
+                            if !transactions.is_empty() {
+                                let full_block = FullBlock {
+                                    author: block.author,
+                                    epoch: block.epoch,
+                                    height: block.height,
+                                    transactions,
+                                };
+                                full_blocks.push(full_block);
+                            }
+                        }
+
+                        if !full_blocks.is_empty() {
+                            if let Some(tx_executor) = &self.tx_executor {
+                                let epoch_data = CommittedEpochData {
+                                    epoch,
+                                    blocks: full_blocks,
+                                };
+                                info!("Consensus: Forwarding data for epoch {} ({} blocks) to executor.", epoch, epoch_data.blocks.len());
+                                if let Err(e) = tx_executor.send(epoch_data).await {
+                                    error!("Consensus: Failed to send epoch data to executor channel: {}", e);
+                                }
                             }
                         }
                     }
 
-                    self.cleanup(digest,epoch,height).await
+                    // Cleanup
+                    if let Some(last_block) = committed_blocks.last() {
+                        self.cleanup(all_digests, last_block.epoch, last_block.height).await
+                    } else {
+                        Ok(())
+                    }
                 },
                 else => break,
             };
