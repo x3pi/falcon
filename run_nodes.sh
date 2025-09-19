@@ -7,7 +7,7 @@
 set -e
 
 # Cấu hình Benchmark (giống hệt trong fabfile.py)
-NODES=5
+NODES=4
 RATE=100000
 TX_SIZE=600
 DURATION=30

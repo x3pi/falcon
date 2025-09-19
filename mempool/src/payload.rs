@@ -4,6 +4,7 @@ use crypto::{PublicKey, SignatureService};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Duration};
+use log::{debug, info};
 
 struct Runner {
     transactions: Vec<Transaction>,
@@ -43,8 +44,11 @@ impl Runner {
     async fn add(&mut self, tx: Transaction) -> Option<Payload> {
         let length = tx.len();
         let ret = match self.size + length > self.max_size {
-            //如果Vec满了就生成一个payload
-            true => Some(self.make().await),
+            //nếu vec đầy thì tạo payload
+            true => {
+                debug!("Buffer full (current size: {}B), creating a new payload.", self.size + length);
+                Some(self.make().await)
+            },
             false => None,
         };
 
@@ -55,20 +59,22 @@ impl Runner {
 
     async fn make(&mut self) -> Payload {
         let transactions = self.transactions.drain(..).collect();
-
         // Cleanup state.
         self.size = 0;
-
         // Make a payload.
-        Payload::new(transactions, self.name, self.signature_service.clone()).await
+        let payload = Payload::new(transactions, self.name, self.signature_service.clone()).await;
+        info!("Created new payload with {} transactions and size {}B.", payload.transactions.len(), payload.size());
+        payload
     }
 
     async fn run(&mut self) {
         loop {
             tokio::select! {
                 Some(transaction) = self.client_channel.recv() => {
+                    debug!("Received new transaction from client with size {}B.", transaction.len());
                     if let Some(payload) = self.add(transaction).await {
                         let message = MempoolMessage::OwnPayload(payload);
+                        info!("Forwarding new payload to Mempool Core.");
                         if let Err(e) = self.core_channel.send(message).await {
                             panic!("Failed to send payload to the core: {}", e);
                         }
@@ -78,7 +84,9 @@ impl Runner {
                     }
                 },
                 Some(sender) = self.request_channel.recv() => {
-                    let _ = sender.send(self.make().await);
+                    let payload = self.make().await;
+                    debug!("Consensus requested a payload. Returning payload with {} transactions and size {}B.", payload.transactions.len(), payload.size());
+                    let _ = sender.send(payload);
                 },
                 else => break,
             }
@@ -127,8 +135,14 @@ impl PayloadMaker {
             .await
             .expect("Failed to receive payload from the inner runner");
         match payload.size() {
-            0 => None,
-            _ => Some(payload),
+            0 => {
+                debug!("PayloadMaker returned an empty payload.");
+                None
+            },
+            _ => {
+                debug!("PayloadMaker returned a payload with size {}B.", payload.size());
+                Some(payload)
+            },
         }
     }
 }

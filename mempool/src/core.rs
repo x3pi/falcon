@@ -6,7 +6,7 @@ use crate::synchronizer::Synchronizer;
 use consensus::{Block, ConsensusMempoolMessage, PayloadStatus, SeqNumber};
 use crypto::{Digest, Hash, PublicKey};
 
-use log::{error,info,  warn};
+use log::{debug, error, info, warn};
 use network::NetMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -190,13 +190,28 @@ impl Core {
         epoch: SeqNumber,
         height: SeqNumber,
     ) -> MempoolResult<Vec<Digest>> {
+        debug!(
+            "get_payload called for epoch {}, height {} with max size {}",
+            epoch, height, max
+        ); // Dòng log mới
+
         // Chỉ tạo payload mới nếu hàng đợi rỗng.
         if self.queue.is_empty() {
+            info!("Mempool queue is empty, requesting new payload from PayloadMaker."); // Dòng log mới
             if let Some(payload) = self.payload_maker.make().await {
+                debug!(
+                    "PayloadMaker created a new payload with size: {}",
+                    payload.size()
+                ); // Dòng log mới
                 self.handle_own_payload(payload).await?;
+            } else {
+                debug!("PayloadMaker returned None (empty payload)."); // Dòng log mới
             }
         }
+
+        debug!("Current queue size: {}", self.queue.len()); // Dòng log mới
         if self.queue.is_empty() {
+            info!("Mempool queue is still empty, returning no payloads to consensus."); // Dòng log mới
             return Ok(Vec::new());
         }
 
@@ -210,21 +225,28 @@ impl Core {
                 let payload: Payload = bincode::deserialize(&bytes)?;
                 if payload.author == self.name {
                     selected_digests.push(digest.clone());
+                    debug!(
+                        "Found and selected own payload: {:?} (size {})",
+                        digest,
+                        payload.size()
+                    ); // Dòng log mới
                 }
             }
         }
-        
+
         // Loại bỏ các payload đã được chọn khỏi hàng đợi ngay lập tức
         for digest in &selected_digests {
             self.queue.remove(digest);
         }
 
-        info!(
-            "Epoch {}: Node {} selected {} of its own payloads to propose.",
-            epoch,
-            height,
-            selected_digests.len()
-        );
+        if selected_digests.len() > 0 {
+            info!(
+                "Epoch {}: Node {} selected {} of its own payloads to propose.",
+                epoch,
+                height,
+                selected_digests.len()
+            );
+        }
 
         Ok(selected_digests.into_iter().take(max_payloads).collect())
     }

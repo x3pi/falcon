@@ -1,16 +1,14 @@
-
-
-
 use crate::config::Export as _;
 use crate::config::{Committee, Parameters, Secret};
 use consensus::{Block,CommittedEpochData, Consensus, ConsensusError, Protocol};
 use crypto::{SignatureService};
-use log::{info, warn};
+use log::{info, warn, error};
 use mempool::{Mempool, MempoolError};
 use store::{Store, StoreError};
 use thiserror::Error;
 use crate::executor::Executor;
 use tokio::sync::mpsc::{channel, Receiver};
+use tokio::time::{sleep, Duration};
 
 #[derive(Error, Debug)]
 pub enum NodeError {
@@ -53,7 +51,11 @@ impl Node {
             info!("Executor is enabled. Will send committed transactions to socket: {}", socket_path);
             let mut executor = Executor::new(rx_executor, socket_path);
             tokio::spawn(async move {
-                executor.run().await;
+                let result = executor.run().await;
+                match result {
+                    Ok(_) => info!("Executor task finished gracefully."),
+                    Err(e) => error!("Executor task failed: {}", e),
+                }
             });
         } else {
             warn!("Executor is disabled. Committed transactions will not be sent anywhere.");
