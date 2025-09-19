@@ -6,9 +6,7 @@ use crate::synchronizer::Synchronizer;
 use consensus::{Block, ConsensusMempoolMessage, PayloadStatus, SeqNumber};
 use crypto::{Digest, Hash, PublicKey};
 
-#[cfg(feature = "benchmark")]
-use log::info;
-use log::{error, warn};
+use log::{error,info,  warn};
 use network::NetMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -192,55 +190,43 @@ impl Core {
         epoch: SeqNumber,
         height: SeqNumber,
     ) -> MempoolResult<Vec<Digest>> {
-        // Bước 1: Nếu hàng đợi rỗng, thử tạo một payload mới từ các giao dịch của client
-        // và thêm nó vào hàng đợi chung.
+        // Chỉ tạo payload mới nếu hàng đợi rỗng.
         if self.queue.is_empty() {
             if let Some(payload) = self.payload_maker.make().await {
-                // handle_own_payload sẽ xử lý việc lưu trữ, thêm vào seen_transactions,
-                // và quan trọng nhất là thêm digest của payload vào self.queue.
                 self.handle_own_payload(payload).await?;
             }
         }
-
-        // Bước 2: Sau khi đã cố gắng bổ sung, nếu hàng đợi vẫn rỗng thì không có gì để đề xuất.
         if self.queue.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Bước 3: LUÔN LUÔN áp dụng logic phân vùng động cho tất cả những gì có trong hàng đợi.
+        // Lấy tất cả payload do chính mình tạo ra.
         let digest_len = Digest::default().size();
         let max_payloads = max / digest_len;
+        let mut selected_digests = Vec::new();
 
-        let mut ordered_payloads: Vec<Digest> = self.queue.iter().cloned().collect();
-        ordered_payloads.sort_by_key(|d| d.0);
-
-        let committee_size = self.committee.size() as u64;
-        let node_id = height;
+        for digest in &self.queue {
+            if let Some(bytes) = self.store.read(digest.to_vec()).await? {
+                let payload: Payload = bincode::deserialize(&bytes)?;
+                if payload.author == self.name {
+                    selected_digests.push(digest.clone());
+                }
+            }
+        }
         
-        let responsible_partition = (node_id + epoch) % committee_size;
-
-        let selected_digests: Vec<Digest> = ordered_payloads
-            .into_iter()
-            .enumerate()
-            .filter(|(i, _)| (*i as u64 % committee_size) == responsible_partition)
-            .map(|(_, digest)| digest)
-            .take(max_payloads)
-            .collect();
-
-        // Xóa các payload đã được chọn khỏi hàng đợi để chúng không được đề xuất lại.
+        // Loại bỏ các payload đã được chọn khỏi hàng đợi ngay lập tức
         for digest in &selected_digests {
             self.queue.remove(digest);
         }
-        
+
         info!(
-            "Epoch {}: Node {} is responsible for partition {} and selected {} payloads.",
+            "Epoch {}: Node {} selected {} of its own payloads to propose.",
             epoch,
-            node_id,
-            responsible_partition,
+            height,
             selected_digests.len()
         );
 
-        Ok(selected_digests)
+        Ok(selected_digests.into_iter().take(max_payloads).collect())
     }
 
     async fn verify_payload(&mut self, block: Box<Block>) -> MempoolResult<bool> {
@@ -259,7 +245,6 @@ impl Core {
         for digest in &digests {
             if let Some(bytes) = self.store.read(digest.to_vec()).await? {
                 let payload: Payload = bincode::deserialize(&bytes)?;
-                // Gộp các giao dịch từ nhiều payload vào một danh sách duy nhất.
                 transactions.extend(payload.transactions);
             }
         }
@@ -285,9 +270,7 @@ impl Core {
                 },
                 Some(message) = self.consensus_channel.recv() => {
                     match message {
-                        // Đảm bảo match arm này nhận đủ 4 tham số
                         ConsensusMempoolMessage::Get(max, epoch, height, sender) => {
-                            // Và lời gọi hàm get_payload truyền đủ 3 tham số
                             let result = self.get_payload(max, epoch, height).await;
                             log(result.as_ref().map(|_| &()));
                             let _ = sender.send(result.unwrap_or_default());

@@ -880,22 +880,22 @@ impl Core {
                     if committed_blocks.is_empty() {
                         continue;
                     }
-
+    
                     // Nhóm các block theo epoch
                     let mut epoch_map: HashMap<SeqNumber, Vec<Block>> = HashMap::new();
                     for block in committed_blocks.clone() {
                         epoch_map.entry(block.epoch).or_default().push(block);
                     }
-
+    
                     let mut all_digests = Vec::new();
-
+    
                     // Xử lý từng epoch
                     for (epoch, blocks) in epoch_map {
                         let mut full_blocks = Vec::new();
                         for block in blocks {
                             let transactions = self.mempool_driver.get_transactions(block.payload.clone()).await;
                             all_digests.extend(block.payload.clone());
-
+    
                             if !transactions.is_empty() {
                                 let full_block = FullBlock {
                                     author: block.author,
@@ -906,7 +906,7 @@ impl Core {
                                 full_blocks.push(full_block);
                             }
                         }
-
+    
                         if !full_blocks.is_empty() {
                             if let Some(tx_executor) = &self.tx_executor {
                                 let epoch_data = CommittedEpochData {
@@ -920,7 +920,7 @@ impl Core {
                             }
                         }
                     }
-
+    
                     // Cleanup
                     if let Some(last_block) = committed_blocks.last() {
                         self.cleanup(all_digests, last_block.epoch, last_block.height).await
