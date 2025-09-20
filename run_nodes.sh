@@ -9,16 +9,16 @@ set -e
 # Cấu hình Benchmark (giống hệt trong fabfile.py)
 NODES=4
 RATE=100000
-TX_SIZE=2000000
+TX_SIZE=600
 DURATION=30
 
 # Cấu hình Node đầy đủ (giống hệt trong fabfile.py)
 FAULT=0
 SYNC_TIMEOUT=2000
-TIMEOUT_DELAY=5000
-SYNC_RETRY_DELAY_CONSENSUS=1000
-MAX_PAYLOAD_SIZE_CONSENSUS=20000000
-MIN_BLOCK_DELAY_CONSENSUS=50
+TIMEOUT_DELAY=2000
+SYNC_RETRY_DELAY_CONSENSUS=10000
+MAX_PAYLOAD_SIZE_CONSENSUS=5000
+MIN_BLOCK_DELAY_CONSENSUS=0
 NETWORK_DELAY=200
 DDOS=false
 RANDOM_DDOS=false
@@ -26,10 +26,11 @@ RANDOM_CHANCE=10
 EXP=0
 FALLBACK=0
 QUEUE_CAPACITY=100000000
-SYNC_RETRY_DELAY_MEMPOOL=1000
-MAX_PAYLOAD_SIZE_MEMPOOL=20000000
-MIN_BLOCK_DELAY_MEMPOOL=50
+SYNC_RETRY_DELAY_MEMPOOL=100000
+MAX_PAYLOAD_SIZE_MEMPOOL=15000
+MIN_BLOCK_DELAY_MEMPOOL=0
 PROTOCOL=0
+
 
 # --- Đường dẫn ---
 BASE_PORT=6000
@@ -128,6 +129,9 @@ for i in $(seq 0 $((NODES-1))); do
     key_file="${key_files[$i]}";
     db_path="$BENCHMARK_DIR/db_$i"; log_file="$LOG_DIR/node-$i.log"
     cmd="$NODE_BINARY run --keys $key_file --committee $COMMITTEE_FILE --store $db_path --parameters $PARAMETERS_FILE"
+    if [ "$i" -eq 0 ]; then
+       cmd="$cmd --executor-socket /tmp/executor.sock"
+    fi
     full_cmd_with_log="RUST_LOG=info $cmd"
     tmux new -d -s "node-$i" "sh -c '$full_cmd_with_log 2> $log_file || echo \"[FATAL] Node process exited.\" >> $log_file'"
 done
