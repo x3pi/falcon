@@ -10,7 +10,7 @@ set -e
 NODES=5
 RATE=100000
 TX_SIZE=600
-DURATION=30
+DURATION=300
 
 # Cấu hình Node đầy đủ (giống hệt trong fabfile.py)
 FAULT=0
