@@ -123,11 +123,12 @@ func handleConnection(conn net.Conn, txChan chan<- int) {
 
 	// Gửi tổng số giao dịch đã nhận được vào channel.
 	txChan <- totalTxsInEpoch
-
-	fmt.Println("=========================================================")
-	fmt.Printf("ĐÃ NHẬN DỮ LIỆU EPOCH: %d\n", epochData.Epoch)
-	fmt.Printf("Tổng số giao dịch trong epoch này: %d\n", totalTxsInEpoch)
-	fmt.Println("=========================================================")
+	if totalTxsInEpoch > 0 {
+		fmt.Println("=========================================================")
+		fmt.Printf("ĐÃ NHẬN DỮ LIỆU EPOCH: %d\n", epochData.Epoch)
+		fmt.Printf("Tổng số giao dịch trong epoch này: %d\n", totalTxsInEpoch)
+		fmt.Println("=========================================================")
+	}
 }
 
 // processStats xử lý việc đếm và in ra thống kê định kỳ.
