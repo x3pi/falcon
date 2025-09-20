@@ -8,7 +8,7 @@ set -e
 
 # Cấu hình Benchmark (giống hệt trong fabfile.py)
 NODES=5
-RATE=150000
+RATE=100000
 TX_SIZE=600
 DURATION=30
 
@@ -156,7 +156,8 @@ echo ""
 echo "========================================================"
 echo "          📊 BENCHMARK RESULTS 📊"
 echo "========================================================"
-(cd "$BENCHMARK_DIR" && ./venv/bin/fab logs)
+
+(cd "$BENCHMARK_DIR" && python3 -m venv venv && source ./venv/bin/activate && pip install -r requirements.txt  && ./venv/bin/fab logs)
 
 echo ""
 echo "✅ COMPLETE!"
