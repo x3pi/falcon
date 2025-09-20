@@ -89,6 +89,7 @@ impl RBCProofMaker {
             votes: Vec::new(),
             used: HashSet::new(),
         }
+
     }
 
     /// Try to append a signature to a (partial) quorum.
@@ -123,6 +124,7 @@ struct PrepareMaker {
     optnum: Stake,
     pesnum: Stake,
     used: HashSet<PublicKey>,
+    quorum_reached: bool, // <--- Thêm cờ mới
 }
 
 impl PrepareMaker {
@@ -131,6 +133,7 @@ impl PrepareMaker {
             optnum: 0,
             pesnum: 0,
             used: HashSet::new(),
+            quorum_reached: false,
         }
     }
 
@@ -140,6 +143,9 @@ impl PrepareMaker {
         prepare: Prepare,
         committee: &Committee,
     ) -> ConsensusResult<Option<(u8, bool)>> {
+        if self.quorum_reached {
+            return Ok(None);
+        }
         // Ensure it is the first time this authority votes.
         let author = prepare.author;
         ensure!(
@@ -154,6 +160,7 @@ impl PrepareMaker {
         let total = self.optnum + self.pesnum;
 
         if total >= committee.quorum_threshold() {
+            self.quorum_reached = true;
             if prepare.phase == PRE_ONE {
                 if self.optnum >= committee.quorum_threshold() {
                     return Ok(Some((OPT, true)));
