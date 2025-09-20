@@ -134,7 +134,9 @@ for i in $(seq 0 $((NODES-1))); do
     key_file="${key_files[$i]}";
     db_path="$BENCHMARK_DIR/db_$i"; log_file="$LOG_DIR/node-$i.log"
     cmd="$NODE_BINARY run --keys $key_file --committee $COMMITTEE_FILE --store $db_path --parameters $PARAMETERS_FILE"
-    
+    if [ "$i" -eq 0 ]; then
+       cmd="$cmd --executor-socket /tmp/executor.sock"
+    fi
     # ==============================================================================
     # SỬA LỖI TẠI ĐÂY: Cưỡng bức ghi log và thêm cơ chế chẩn đoán lỗi
     # ==============================================================================
