@@ -95,10 +95,11 @@ impl Core {
         rx_core: Receiver<ConsensusMessage>,
         network_filter: Sender<FilterInput>,
         commit_channel: Sender<Block>,
+        executor_socket: Option<String>,
     ) -> Self {
         let (tx_commit, rx_commit) = channel(10000);
         let aggregator = Aggregator::new(committee.clone());
-        let commitor = Commitor::new(tx_commit.clone(), committee.clone());
+        let commitor = Commitor::new(tx_commit.clone(), committee.clone(), executor_socket); // Truyền vào đây
         Self {
             fallback: parameters.fallback,
             epoch: 0,

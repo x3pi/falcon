@@ -33,6 +33,7 @@ impl Consensus {
         tx_consensus_mempool: Sender<ConsensusMempoolMessage>,
         tx_commit: Sender<Block>,
         protocol: Protocol,
+        executor_socket: Option<String>,
     ) -> ConsensusResult<()> {
         info!(
             "Consensus timeout delay set to {} ms",
@@ -115,6 +116,7 @@ impl Consensus {
                     /* core_channel */ rx_core,
                     /* network_filter */ tx_filter,
                     /* commit_channel */ tx_commit,
+                    executor_socket,
                 );
                 tokio::spawn(async move {
                     core.run().await;

@@ -36,6 +36,7 @@ impl Node {
         key_file: &str,
         store_path: &str,
         parameters: Option<&str>,
+        executor_socket: Option<&str>,
     ) -> Result<Self, NodeError> {
         let (tx_commit, rx_commit) = channel(10000); //commit channel
         let (tx_consensus, rx_consensus) = channel(10000); // 协议交流消息
@@ -93,6 +94,7 @@ impl Node {
             tx_consensus_mempool,
             tx_commit,
             protocol,
+            executor_socket.map(String::from),
         )
         .await?;
 
