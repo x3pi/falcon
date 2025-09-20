@@ -30,11 +30,11 @@ type CommittedEpochData struct {
 	Blocks []FullBlock `json:"blocks"`
 }
 
-// TransactionCounter quản lý tổng số giao dịch đã nhận và thời gian bắt đầu.
+// TransactionCounter quản lý tổng số giao dịch đã nhận.
+// Chúng ta sẽ không cần lưu startTime nữa vì sẽ tính TPS cho 30s gần nhất.
 type TransactionCounter struct {
-	mu        sync.Mutex
-	totalTxs  int64
-	startTime time.Time
+	mu       sync.Mutex
+	totalTxs int64
 }
 
 func (tc *TransactionCounter) addTransactions(count int) {
@@ -43,16 +43,10 @@ func (tc *TransactionCounter) addTransactions(count int) {
 	tc.mu.Unlock()
 }
 
-func (tc *TransactionCounter) getStats() (int64, float64) {
+func (tc *TransactionCounter) reset() {
 	tc.mu.Lock()
-	defer tc.mu.Unlock()
-
-	elapsed := time.Since(tc.startTime).Seconds()
-	if elapsed == 0 {
-		return tc.totalTxs, 0
-	}
-	tps := float64(tc.totalTxs) / elapsed
-	return tc.totalTxs, tps
+	tc.totalTxs = 0
+	tc.mu.Unlock()
 }
 
 func main() {
@@ -72,9 +66,7 @@ func main() {
 	log.Printf("Máy chủ đang lắng nghe trên socket: %s", socketPath)
 
 	// Khởi tạo bộ đếm giao dịch.
-	counter := &TransactionCounter{
-		startTime: time.Now(),
-	}
+	counter := &TransactionCounter{}
 	// Kênh để gửi số lượng giao dịch từ các goroutine xử lý kết nối.
 	txChan := make(chan int)
 
@@ -99,7 +91,6 @@ func main() {
 func handleConnection(conn net.Conn, txChan chan<- int) {
 	// Đảm bảo kết nối sẽ được đóng sau khi xử lý xong.
 	defer conn.Close()
-	// log.Printf("Đã nhận kết nối từ: %s", conn.RemoteAddr().String())
 
 	// Tạo một bộ giải mã JSON để đọc trực tiếp từ luồng kết nối.
 	decoder := json.NewDecoder(conn)
@@ -144,12 +135,18 @@ func processStats(txChan <-chan int, counter *TransactionCounter) {
 			// Nhận số lượng giao dịch từ các kết nối và cập nhật bộ đếm.
 			counter.addTransactions(count)
 		case <-ticker.C:
-			// In thống kê sau mỗi 30 giây.
-			total, tps := counter.getStats()
+			// Lấy tổng số giao dịch trong 30s vừa qua.
+			total := counter.totalTxs
+			// Tính TPS trung bình cho khoảng thời gian vừa rồi.
+			tps := float64(total) / statsInterval.Seconds()
+
 			fmt.Println("\n--- THỐNG KÊ TPS ---")
-			fmt.Printf("Tổng số giao dịch đã nhận: %d\n", total)
+			fmt.Printf("Tổng số giao dịch đã nhận (trong %s): %d\n", statsInterval, total)
 			fmt.Printf("TPS trung bình (trong %s): %.2f giao dịch/giây\n", statsInterval, tps)
 			fmt.Println("--------------------")
+
+			// Reset bộ đếm để bắt đầu tính cho 30s tiếp theo.
+			counter.reset()
 		}
 	}
 }
