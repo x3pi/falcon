@@ -99,7 +99,7 @@ func main() {
 func handleConnection(conn net.Conn, txChan chan<- int) {
 	// Đảm bảo kết nối sẽ được đóng sau khi xử lý xong.
 	defer conn.Close()
-	log.Printf("Đã nhận kết nối từ: %s", conn.RemoteAddr().String())
+	// log.Printf("Đã nhận kết nối từ: %s", conn.RemoteAddr().String())
 
 	// Tạo một bộ giải mã JSON để đọc trực tiếp từ luồng kết nối.
 	decoder := json.NewDecoder(conn)
