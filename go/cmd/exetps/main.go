@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -38,6 +39,12 @@ func (tc *TransactionCounter) reset() {
 }
 
 func main() {
+	var socketID int
+	flag.IntVar(&socketID, "id", 0, "ID của socket executor")
+	flag.Parse()
+
+	socketPath := fmt.Sprintf("/tmp/executor%d.sock", socketID)
+
 	if err := os.RemoveAll(socketPath); err != nil {
 		log.Fatalf("Không thể xóa file socket cũ: %v", err)
 	}
