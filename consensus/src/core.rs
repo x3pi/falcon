@@ -6,9 +6,7 @@ use crate::config::{Committee, Parameters, Stake};
 use crate::error::{ConsensusError, ConsensusResult};
 use crate::filter::FilterInput;
 use crate::mempool::MempoolDriver;
-use crate::messages::{
-    ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, ReadyVote,
-};
+use crate::messages::{ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, ReadyVote};
 use crate::synchronizer::Synchronizer;
 use async_recursion::async_recursion;
 use crypto::{Digest, PublicKey, SignatureService};
@@ -83,12 +81,13 @@ pub struct Core {
 
 impl Core {
     #[allow(clippy::too_many_arguments)]
+
     pub fn new(
         name: PublicKey,
         committee: Committee,
         parameters: Parameters,
         signature_service: SignatureService,
-        store: Store,
+        store: Store, // Tham số này đã có sẵn
         mempool_driver: MempoolDriver,
         synchronizer: Synchronizer,
         tx_core: Sender<ConsensusMessage>,
@@ -99,7 +98,14 @@ impl Core {
     ) -> Self {
         let (tx_commit, rx_commit) = channel(10000);
         let aggregator = Aggregator::new(committee.clone());
-        let commitor = Commitor::new(tx_commit.clone(), committee.clone(), executor_socket); // Truyền vào đây
+
+        // SỬA ĐỔI: Truyền store.clone() vào Commitor::new
+        let commitor = Commitor::new(
+            tx_commit.clone(),
+            committee.clone(),
+            executor_socket,
+            store.clone(), // <--- Thêm dòng này
+        );
         Self {
             fallback: parameters.fallback,
             epoch: 0,
@@ -108,7 +114,7 @@ impl Core {
             committee,
             parameters,
             signature_service,
-            store,
+            store, // Giữ nguyên
             mempool_driver,
             synchronizer,
             network_filter,
@@ -629,25 +635,24 @@ impl Core {
             "processing common coin epoch {} height {} round {}",
             epoch, height, round
         );
-    
+
         // Đặt giá trị mặc định cho coin là 1 (OPT).
         let coin = OPT as usize;
-    
+
         let mux_flags = self
             .aba_mux_flags
             .entry((epoch, height, round))
             .or_insert([false, false]);
-    
+
         let mut val = coin;
         if mux_flags[coin] && !mux_flags[1 - coin] {
-            self.process_aba_output(epoch, height, round, coin)
-                .await?;
+            self.process_aba_output(epoch, height, round, coin).await?;
         } else if !mux_flags[coin] && mux_flags[1 - coin] {
             val = 1 - coin;
         }
         self.aba_adcance_round(epoch, height, round + 1, val)
             .await?;
-    
+
         Ok(())
     }
 
@@ -688,14 +693,14 @@ impl Core {
                 }
 
                 if mux_flags[PES as usize] || mux_flags[OPT as usize] {
-                    self.process_common_coin(aba_mux.epoch, aba_mux.height, aba_mux.round).await?;
+                    self.process_common_coin(aba_mux.epoch, aba_mux.height, aba_mux.round)
+                        .await?;
                 }
             }
         }
 
         Ok(())
     }
-
 
     async fn handle_aba_output(&mut self, output: &ABAOutput) -> ConsensusResult<()> {
         debug!(
