@@ -1,3 +1,5 @@
+// consensus/src/commitor.rs
+
 use crate::config::Committee;
 use crate::{Block, SeqNumber};
 use crypto::{Digest, PublicKey, Signature};
@@ -11,7 +13,6 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub const MAX_BLOCK_BUFFER: usize = 100000;
 
-// Một bản sao cục bộ của mempool::Payload để tránh phụ thuộc vòng tròn
 #[derive(Serialize, Deserialize)]
 struct MempoolPayload {
     pub transactions: Vec<Vec<u8>>,
@@ -33,17 +34,37 @@ pub struct CommittedEpochData {
     pub blocks: Vec<FullBlock>,
 }
 
+// TỐI ƯU 1: Hàm gửi dữ liệu qua socket đã được tách ra.
+// Hàm này sẽ chạy trong một task riêng biệt.
+async fn send_to_executor(mut rx_executor: Receiver<CommittedEpochData>, socket_path: String) {
+    while let Some(epoch_data) = rx_executor.recv().await {
+        if let Ok(serialized_data) = serde_json::to_string(&epoch_data) {
+            match UnixStream::connect(&socket_path).await {
+                Ok(mut stream) => {
+                    if let Err(e) = stream.write_all(serialized_data.as_bytes()).await {
+                        log::error!("Failed to send data to executor socket: {}", e);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to connect to executor socket at {}: {}", &socket_path, e);
+                }
+            }
+        }
+    }
+}
+
+
 async fn try_to_commit(
     mut cur_ind: usize,
     buffer: &mut Vec<Option<Block>>,
     filter: &mut Vec<bool>,
     tx_commit_digest: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
-    executor_socket: Option<&str>,
-    store: &mut Store, // SỬA ĐỔI 1: Chấp nhận tham chiếu mutable
+    // TỐI ƯU 2: Thay vì đường dẫn socket, chúng ta nhận một Sender để gửi dữ liệu cho task mạng.
+    tx_executor: &Option<Sender<CommittedEpochData>>,
+    store: &mut Store,
 ) -> usize {
     let mut committed_blocks: Vec<Block> = Vec::new();
 
-    // Bước 1: Thu thập tất cả các block sẵn sàng để cam kết từ buffer.
     loop {
         if let Some(block) = buffer[cur_ind].take() {
             committed_blocks.push(block);
@@ -60,8 +81,9 @@ async fn try_to_commit(
         return cur_ind;
     }
 
-    // Bước 2: Nếu có cấu hình socket, xử lý và gửi dữ liệu đi.
-    if let Some(socket_path) = executor_socket {
+    // TỐI ƯU 3: Chỉ gửi dữ liệu vào channel nếu tx_executor tồn tại.
+    // Việc gửi vào channel nhanh hơn nhiều so với kết nối socket.
+    if let Some(tx) = tx_executor {
         let mut epoch_map: HashMap<SeqNumber, Vec<Block>> = HashMap::new();
         for block in &committed_blocks {
             epoch_map.entry(block.epoch).or_default().push(block.clone());
@@ -72,7 +94,6 @@ async fn try_to_commit(
             for block in blocks {
                 let mut transactions = Vec::new();
                 for digest in &block.payload {
-                    // Lời gọi .read() giờ đây hợp lệ vì store là mutable
                     if let Ok(Some(bytes)) = store.read(digest.to_vec()).await {
                         if let Ok(payload) = bincode::deserialize::<MempoolPayload>(&bytes) {
                             transactions.extend(payload.transactions);
@@ -92,31 +113,20 @@ async fn try_to_commit(
 
             if !full_blocks.is_empty() {
                 let epoch_data = CommittedEpochData { epoch, blocks: full_blocks };
-                if let Ok(serialized_data) = serde_json::to_string(&epoch_data) {
-                    match UnixStream::connect(socket_path).await {
-                        Ok(mut stream) => {
-                            if let Err(e) = stream.write_all(serialized_data.as_bytes()).await {
-                                log::error!("Failed to send data to executor socket: {}", e);
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Failed to connect to executor socket at {}: {}", socket_path, e);
-                        }
-                    }
+                // Gửi vào channel, không block.
+                if let Err(e) = tx.send(epoch_data).await {
+                    log::error!("Failed to send epoch data to executor task: {}", e);
                 }
             }
         }
     }
 
-    // Bước 3: Thông báo cho core về các digest đã cam kết để dọn dẹp.
     let mut all_digests = Vec::new();
     let (last_epoch, last_height) = committed_blocks.last().map_or((0,0), |b| (b.epoch, b.height));
 
     for block in committed_blocks {
         info!("Committed {}", block);
         if !block.payload.is_empty() {
-            info!("Committed {}", block);
-
             #[cfg(feature = "benchmark")]
             for x in &block.payload {
                 info!(
@@ -154,13 +164,19 @@ impl Commitor {
         let (tx_block, mut rx_block): (_, Receiver<Block>) = channel(10000);
         let (tx_filter, mut rx_filter): (_, Receiver<usize>) = channel(10000);
 
+        // TỐI ƯU 4: Tạo channel và task cho việc gửi dữ liệu executor.
+        let tx_executor = if let Some(socket_path) = executor_socket {
+            let (tx_executor, rx_executor) = channel::<CommittedEpochData>(100);
+            tokio::spawn(send_to_executor(rx_executor, socket_path));
+            Some(tx_executor)
+        } else {
+            None
+        };
+
         tokio::spawn(async move {
             let mut cur_ind = 0;
             let mut buffer: Vec<Option<Block>> = vec![None; MAX_BLOCK_BUFFER];
             let mut filter: Vec<bool> = vec![false; MAX_BLOCK_BUFFER];
-            let socket_ref = executor_socket.as_deref();
-            
-            // `store` được di chuyển vào closure và có thể được mượn dưới dạng mutable.
             let mut store = store;
 
             loop {
@@ -179,8 +195,8 @@ impl Commitor {
                         filter[ind] = true;
                     }
                 }
-                // SỬA ĐỔI 2: Truyền một tham chiếu mutable của store
-                cur_ind = try_to_commit(cur_ind, &mut buffer, &mut filter, tx_commit.clone(), socket_ref, &mut store).await;
+                // TỐI ƯU 5: Truyền tx_executor vào hàm.
+                cur_ind = try_to_commit(cur_ind, &mut buffer, &mut filter, tx_commit.clone(), &tx_executor, &mut store).await;
             }
         });
 
