@@ -115,6 +115,17 @@ async fn try_to_commit(
     for block in committed_blocks {
         info!("Committed {}", block);
         if !block.payload.is_empty() {
+            info!("Committed {}", block);
+
+            #[cfg(feature = "benchmark")]
+            for x in &block.payload {
+                info!(
+                    "Committed B{}({}) epoch {}",
+                    block.height,
+                    base64::encode(x),
+                    block.epoch,
+                );
+            }
             all_digests.extend(block.payload);
         }
     }
