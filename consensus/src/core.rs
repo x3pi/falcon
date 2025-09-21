@@ -6,9 +6,7 @@ use crate::config::{Committee, Parameters, Stake};
 use crate::error::{ConsensusError, ConsensusResult};
 use crate::filter::FilterInput;
 use crate::mempool::MempoolDriver;
-use crate::messages::{
-    ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, ReadyVote,
-};
+use crate::messages::{ABAOutput, ABAVal, Block, EchoVote, Prepare, RBCProof, ReadyVote};
 use crate::synchronizer::Synchronizer;
 use async_recursion::async_recursion;
 use crypto::{Digest, PublicKey, SignatureService};
@@ -83,22 +81,31 @@ pub struct Core {
 
 impl Core {
     #[allow(clippy::too_many_arguments)]
+
     pub fn new(
         name: PublicKey,
         committee: Committee,
         parameters: Parameters,
         signature_service: SignatureService,
-        store: Store,
+        store: Store, // Tham số này đã có sẵn
         mempool_driver: MempoolDriver,
         synchronizer: Synchronizer,
         tx_core: Sender<ConsensusMessage>,
         rx_core: Receiver<ConsensusMessage>,
         network_filter: Sender<FilterInput>,
         commit_channel: Sender<Block>,
+        executor_socket: Option<String>,
     ) -> Self {
         let (tx_commit, rx_commit) = channel(10000);
         let aggregator = Aggregator::new(committee.clone());
-        let commitor = Commitor::new(tx_commit.clone(), committee.clone());
+
+        // SỬA ĐỔI: Truyền store.clone() vào Commitor::new
+        let commitor = Commitor::new(
+            tx_commit.clone(),
+            committee.clone(),
+            executor_socket,
+            store.clone(), // <--- Thêm dòng này
+        );
         Self {
             fallback: parameters.fallback,
             epoch: 0,
