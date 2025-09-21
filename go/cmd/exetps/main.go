@@ -101,6 +101,7 @@ func handleConnection(conn net.Conn, txChan chan<- int) {
 			if len(block.Transactions) > 0 {
 				fmt.Println("=========================================================")
 				fmt.Printf("ĐÃ NHẬN DỮ LIỆU EPOCH: %d\n", block.Epoch)
+				fmt.Printf("ĐÃ NHẬN DỮ LIỆU EPOCH (thời gian: %s): %d\n", time.Now().Format("2006-01-02 15:04:05.000"), block.Epoch)
 				fmt.Printf("ĐÃ NHẬN DỮ LIỆU block Height: %d\n", block.Height)
 				fmt.Printf("Tổng số giao dịch trong block này: %d\n", len(block.Transactions))
 				fmt.Println("=========================================================")
