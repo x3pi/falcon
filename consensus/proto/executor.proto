@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package proto;
+
+// Định nghĩa cấu trúc của một block đầy đủ thông tin.
+message FullBlock {
+    string author = 1;
+    uint64 epoch = 2;
+    uint64 height = 3;
+    repeated bytes transactions = 4;
+}
+
+// Định nghĩa cấu trúc dữ liệu cấp cao nhất cho một epoch đã commit.
+message CommittedEpochData {
+    uint64 epoch = 1;
+    repeated FullBlock blocks = 2;
+}

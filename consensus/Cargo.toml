@@ -22,6 +22,11 @@ base64 = "0.13.0"
 store = { path = "../store" }
 crypto = { path = "../crypto" }
 network = { path = "../network" }
+prost = "0.12"
+tokio-util = { version = "0.7", features = ["codec"] }
+
+[build-dependencies]
+prost-build = "0.12"
 
 [dev-dependencies]
 rand = "0.7.3"
