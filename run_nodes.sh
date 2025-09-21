@@ -129,7 +129,7 @@ for i in $(seq 0 $((NODES-1))); do
     key_file="${key_files[$i]}";
     db_path="$BENCHMARK_DIR/db_$i"; log_file="$LOG_DIR/node-$i.log"
     cmd="$NODE_BINARY run --keys $key_file --committee $COMMITTEE_FILE --store $db_path --parameters $PARAMETERS_FILE"
-    if [ "$i" -eq 0 ]; then
+    if [ "$i" -eq 0 ] || [ "$i" -eq 1 ]; then
        cmd="$cmd --executor-socket /tmp/executor$i.sock"
     fi
     full_cmd_with_log="RUST_LOG=info $cmd"
