@@ -6,9 +6,7 @@ use crate::synchronizer::Synchronizer;
 use consensus::{Block, ConsensusMempoolMessage, PayloadStatus, SeqNumber};
 use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
-#[cfg(feature = "benchmark")]
-use log::info;
-use log::{error, warn};
+use log::{error,info, warn};
 use network::NetMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -140,6 +138,7 @@ impl Core {
         let digest = payload.digest();
         self.process_own_payload(&digest, payload).await?; //payload存入queue中
         self.queue.insert(digest);
+        info!("Mempool: Đã thêm payload của riêng mình {:?} vào hàng đợi. Kích thước hàng đợi: {}", digest, self.queue.len());
         Ok(())
     }
 
@@ -168,6 +167,7 @@ impl Core {
 
         // Add the payload to the queue.
         self.queue.insert(digest);
+        info!("Mempool: Đã thêm payload {:?} từ {:?} vào hàng đợi. Kích thước hàng đợi: {}", digest, author, self.queue.len());
         Ok(())
     }
 
