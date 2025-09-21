@@ -137,8 +137,9 @@ impl Core {
         // we will add to the queue.
         let digest = payload.digest();
         self.process_own_payload(&digest, payload).await?; //payload存入queue中
+        let digest_for_log = digest.clone();
         self.queue.insert(digest);
-        info!("Mempool: Đã thêm payload của riêng mình {:?} vào hàng đợi. Kích thước hàng đợi: {}", digest, self.queue.len());
+        info!("Mempool: Đã thêm payload của riêng mình {:?} vào hàng đợi. Kích thước hàng đợi: {}", digest_for_log, self.queue.len());
         Ok(())
     }
 
@@ -164,10 +165,10 @@ impl Core {
         // TODO [issue #18]: A bad node may make us store a lot of junk. There is no
         // limit to how many payloads they can send us, and we will store them all.
         self.store_payload(digest.to_vec(), &payload).await;
-
+        let digest_for_log = digest.clone();
         // Add the payload to the queue.
         self.queue.insert(digest);
-        info!("Mempool: Đã thêm payload {:?} từ {:?} vào hàng đợi. Kích thước hàng đợi: {}", digest, author, self.queue.len());
+        info!("Mempool: Đã thêm payload {:?} từ {:?} vào hàng đợi. Kích thước hàng đợi: {}", digest_for_log, author, self.queue.len());
         Ok(())
     }
 
@@ -191,8 +192,10 @@ impl Core {
             if let Some(payload) = self.payload_maker.make().await {
                 let digest = payload.digest();
                 self.process_own_payload(&digest, payload).await?;
+                info!("Mempool: Đã tạo và xử lý payload mới {:?}. Kích thước hàng đợi: {}", digest, self.queue.len());
                 Ok(vec![digest])
             } else {
+                info!("Mempool: Không có payload nào được tạo.");
                 Ok(Vec::new())
             }
         } else {
@@ -201,6 +204,7 @@ impl Core {
             for x in &digests {
                 self.queue.remove(x); //去重
             }
+            info!("Mempool: Kích thước hàng đợi sau khi lấy payload: {}", self.queue.len());
             Ok(digests)
         }
     }
