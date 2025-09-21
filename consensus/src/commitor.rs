@@ -3,13 +3,17 @@
 use crate::config::Committee;
 use crate::{Block, SeqNumber};
 use crypto::{Digest, PublicKey, Signature};
-use log::info;
+use futures::future::try_join_all;
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::time::Duration;
 use store::Store;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::time::sleep;
 
 pub const MAX_BLOCK_BUFFER: usize = 100000;
 
@@ -34,20 +38,26 @@ pub struct CommittedEpochData {
     pub blocks: Vec<FullBlock>,
 }
 
-// TỐI ƯU 1: Hàm gửi dữ liệu qua socket đã được tách ra.
-// Hàm này sẽ chạy trong một task riêng biệt.
+// Hàm send_to_executor với socket bền vững (giữ nguyên)
 async fn send_to_executor(mut rx_executor: Receiver<CommittedEpochData>, socket_path: String) {
-    while let Some(epoch_data) = rx_executor.recv().await {
-        if let Ok(serialized_data) = serde_json::to_string(&epoch_data) {
-            match UnixStream::connect(&socket_path).await {
-                Ok(mut stream) => {
-                    if let Err(e) = stream.write_all(serialized_data.as_bytes()).await {
-                        log::error!("Failed to send data to executor socket: {}", e);
+    loop {
+        info!("Connecting to executor socket at {}...", &socket_path);
+        match UnixStream::connect(&socket_path).await {
+            Ok(mut stream) => {
+                info!("Successfully connected to executor socket.");
+                while let Some(epoch_data) = rx_executor.recv().await {
+                    if let Ok(mut serialized_data) = serde_json::to_vec(&epoch_data) {
+                        serialized_data.push(b'\n');
+                        if let Err(e) = stream.write_all(&serialized_data).await {
+                            warn!("Failed to send data to executor socket: {}. Attempting to reconnect...", e);
+                            break;
+                        }
                     }
                 }
-                Err(e) => {
-                    log::error!("Failed to connect to executor socket at {}: {}", &socket_path, e);
-                }
+            }
+            Err(e) => {
+                warn!("Failed to connect to executor socket at {}: {}. Retrying in 1 second...", &socket_path, e);
+                sleep(Duration::from_secs(1)).await;
             }
         }
     }
@@ -59,9 +69,8 @@ async fn try_to_commit(
     buffer: &mut Vec<Option<Block>>,
     filter: &mut Vec<bool>,
     tx_commit_digest: Sender<(Vec<Digest>, SeqNumber, SeqNumber)>,
-    // TỐI ƯU 2: Thay vì đường dẫn socket, chúng ta nhận một Sender để gửi dữ liệu cho task mạng.
     tx_executor: &Option<Sender<CommittedEpochData>>,
-    store: &mut Store,
+    store: &Store, // Sửa: Nhận &Store thay vì &mut Store vì clone không cần mut.
 ) -> usize {
     let mut committed_blocks: Vec<Block> = Vec::new();
 
@@ -81,9 +90,38 @@ async fn try_to_commit(
         return cur_ind;
     }
 
-    // TỐI ƯU 3: Chỉ gửi dữ liệu vào channel nếu tx_executor tồn tại.
-    // Việc gửi vào channel nhanh hơn nhiều so với kết nối socket.
     if let Some(tx) = tx_executor {
+        let digests_to_read: Vec<_> = committed_blocks
+            .iter()
+            .flat_map(|block| block.payload.iter().cloned())
+            .map(|digest| digest.to_vec())
+            .collect();
+        
+        // ##################################################################################
+        // # SỬA LỖI: Clone `store` bên trong closure của map.
+        // ##################################################################################
+        let read_futures = digests_to_read.iter().map(|digest_vec| {
+            let mut store_clone = store.clone(); // Tạo một clone an toàn
+            async move {
+                store_clone.read(digest_vec.clone()).await // Sử dụng clone trong future
+            }
+        });
+        let results = try_join_all(read_futures).await;
+
+        let mut payload_cache = HashMap::new();
+        if let Ok(payloads_results) = results {
+            // Sửa đổi nhỏ: kết quả từ try_join_all là Result<Vec<Option<Vec<u8>>>, StoreError>
+            // nên ta cần xử lý `payloads_results` thay vì `payloads`
+            for (digest_vec, payload_bytes_opt_res) in digests_to_read.into_iter().zip(payloads_results) {
+                 if let Some(payload_bytes) = payload_bytes_opt_res {
+                    let digest = Digest::try_from(digest_vec.as_slice()).unwrap();
+                    payload_cache.insert(digest, payload_bytes);
+                 }
+            }
+        } else {
+            warn!("Failed to read payloads from store in batch.");
+        }
+        
         let mut epoch_map: HashMap<SeqNumber, Vec<Block>> = HashMap::new();
         for block in &committed_blocks {
             epoch_map.entry(block.epoch).or_default().push(block.clone());
@@ -94,7 +132,7 @@ async fn try_to_commit(
             for block in blocks {
                 let mut transactions = Vec::new();
                 for digest in &block.payload {
-                    if let Ok(Some(bytes)) = store.read(digest.to_vec()).await {
+                    if let Some(bytes) = payload_cache.get(digest) {
                         if let Ok(payload) = bincode::deserialize::<MempoolPayload>(&bytes) {
                             transactions.extend(payload.transactions);
                         }
@@ -113,9 +151,8 @@ async fn try_to_commit(
 
             if !full_blocks.is_empty() {
                 let epoch_data = CommittedEpochData { epoch, blocks: full_blocks };
-                // Gửi vào channel, không block.
                 if let Err(e) = tx.send(epoch_data).await {
-                    log::error!("Failed to send epoch data to executor task: {}", e);
+                    warn!("Failed to send epoch data to executor task channel: {}", e);
                 }
             }
         }
@@ -149,6 +186,7 @@ async fn try_to_commit(
     cur_ind
 }
 
+// Phần còn lại của file giữ nguyên không đổi.
 pub struct Commitor {
     tx_block: Sender<Block>,
     tx_filter: Sender<usize>,
@@ -164,7 +202,6 @@ impl Commitor {
         let (tx_block, mut rx_block): (_, Receiver<Block>) = channel(10000);
         let (tx_filter, mut rx_filter): (_, Receiver<usize>) = channel(10000);
 
-        // TỐI ƯU 4: Tạo channel và task cho việc gửi dữ liệu executor.
         let tx_executor = if let Some(socket_path) = executor_socket {
             let (tx_executor, rx_executor) = channel::<CommittedEpochData>(100);
             tokio::spawn(send_to_executor(rx_executor, socket_path));
@@ -177,26 +214,25 @@ impl Commitor {
             let mut cur_ind = 0;
             let mut buffer: Vec<Option<Block>> = vec![None; MAX_BLOCK_BUFFER];
             let mut filter: Vec<bool> = vec![false; MAX_BLOCK_BUFFER];
-            let mut store = store;
+            let store = store; // `store` được move vào đây.
 
             loop {
                 tokio::select! {
                     Some(block) = rx_block.recv() => {
                         let rank = block.rank(&committee);
                         if buffer[rank].is_some() {
-                            log::warn!("Commitor buffer overflow at rank {}", rank);
+                            warn!("Commitor buffer overflow at rank {}", rank);
                         }
                         buffer[rank] = Some(block);
                     },
                     Some(ind) = rx_filter.recv() => {
                         if filter[ind] {
-                             log::warn!("Commitor filter overflow at index {}", ind);
+                             warn!("Commitor filter overflow at index {}", ind);
                         }
                         filter[ind] = true;
                     }
                 }
-                // TỐI ƯU 5: Truyền tx_executor vào hàm.
-                cur_ind = try_to_commit(cur_ind, &mut buffer, &mut filter, tx_commit.clone(), &tx_executor, &mut store).await;
+                cur_ind = try_to_commit(cur_ind, &mut buffer, &mut filter, tx_commit.clone(), &tx_executor, &store).await;
             }
         });
 
