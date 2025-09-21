@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package proto;
+
+// Đường dẫn này nên trỏ đến nơi bạn muốn mã Go được tạo ra.
+// Ví dụ: "github.com/your-username/your-project/pkg/proto"
+option go_package = "github.com/meta-node-blockchain/meta-node/pkg/proto";
+
+// =======================================================
+// === LUỒNG YÊU CẦU BAN ĐẦU (RECEIVER -> SENDER) ===
+// =======================================================
+
+// Receiver -> Sender: Yêu cầu gửi một thư mục cụ thể.
+message DirectoryRequest {
+    // Tên định danh cho thư mục cần gửi, ví dụ: "db_data".
+    // Sender sẽ dựa vào đây để biết cần gửi thư mục nào.
+    string directory_name = 1;
+
+    // Địa chỉ mà Sender cần kết nối lại để gửi các chunk file.
+    // Ví dụ: "127.0.0.1:9999".
+    string callback_address = 2;
+}
+
+
+// =======================================================
+// === LUỒNG TRUYỀN TẢI FILE (SENDER -> RECEIVER) ===
+// =======================================================
+
+// Sender -> Receiver: Tin nhắn đầu tiên, báo hiệu bắt đầu quá trình upload.
+message StartFileUploadRequest {
+    // Tên gốc của file nén, ví dụ: "db_data_backup_12345.7z".
+    string base_archive_name = 1;
+    // Tổng số chunk sẽ được gửi.
+    int32 total_chunks = 2;
+}
+
+// Sender -> Receiver: Chứa một phần (chunk) của dữ liệu file.
+message FileChunk {
+    // Tên của chunk, ví dụ: "db_data_backup_12345.7z.001".
+    string part_name = 1;
+    // Nội dung nhị phân của chunk.
+    bytes data = 2;
+}
+
+
+// =======================================================
+// === LUỒNG KHÔI PHỤC (TÙY CHỌN, CHƯA TRIỂN KHAI HOÀN CHỈNH) ===
+// =======================================================
+
+// Sender -> Receiver: Hỏi xem đã nhận được chunk nào của một file nén rồi.
+message SyncRequest {
+    string base_archive_name = 1;
+}
+
+// Receiver -> Sender: Trả lời với danh sách các chunk đã nhận thành công.
+message SyncResponse {
+    // Danh sách tên các chunk, ví dụ: ["backup.7z.001", "backup.7z.002"].
+    repeated string received_part_names = 1;
+    // ID của SyncRequest mà phản hồi này dành cho.
+    string request_id = 2;
+}

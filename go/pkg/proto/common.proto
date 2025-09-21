@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package proto;
+
+// Tùy chọn để chỉ định gói Go sẽ được tạo ra
+option go_package = "github.com/meta-node-blockchain/meta-node/pkg/proto";
+
+// Message để đóng gói một giá trị uint64, ví dụ như Chain ID.
+message Uint64 {
+    uint64 value = 1;
+}
+
+// Bạn có thể thêm các message chung khác vào đây trong tương lai.

@@ -1,0 +1,20 @@
+syntax = "proto3";
+package checkpoint;
+
+option go_package = "/proto";
+option java_package = "com.meta_node.protos.compiled.checkpoint";
+
+message ValidatorWithStakeAmount {
+  bytes Address = 1;
+  bytes StakeAmount = 2;
+}
+
+message ValidatorCheckPoint {
+  uint64 BlockNumber = 1; 
+  repeated ValidatorWithStakeAmount PreValidatorWithStakeAmount = 2;
+  repeated ValidatorWithStakeAmount ValidatorWithStakeAmount = 3;
+  bytes ScheduleSeed = 4;
+  bytes NextScheduleSeed = 5;
+  
+  bytes StakeStorageRoot = 6;
+}
