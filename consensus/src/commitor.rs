@@ -166,7 +166,7 @@ impl Commitor {
 
         // TỐI ƯU 4: Tạo channel và task cho việc gửi dữ liệu executor.
         let tx_executor = if let Some(socket_path) = executor_socket {
-            let (tx_executor, rx_executor) = channel::<CommittedEpochData>(100);
+            let (tx_executor, rx_executor) = channel::<CommittedEpochData>(10000);
             tokio::spawn(send_to_executor(rx_executor, socket_path));
             Some(tx_executor)
         } else {
